@@ -6,11 +6,16 @@ Dansk stævneapp: tilføj stævne → Single / Double / Mix → vælg op til 10 
 Importér dette repository som et projekt med framework **Other**. `index.html` er forsiden, og `api/analyze.js` er serverfunktionen. Ingen npm-afhængigheder eller build-kommando kræves.
 
 Indstil servermiljøvariabler i Vercel (aldrig i HTML, kode eller GitHub):
-- `OPENAI_API_KEY`: OpenAI API-nøgle med adgang og saldo. API-forbrug afregnes separat fra ChatGPT.
-- `APP_ACCESS_CODE`: en lang, tilfældig adgangskode til billedaflæsningen. Indtastes i appen og gemmes ikke i browserstorage.
-- `OPENAI_MODEL`: valgfrit, standard `gpt-4.1`. Vælg en model, der understøtter billeder og struktureret output.
+- `GEMINI_API_KEY`: eksisterende Gemini API-nøgle. `GOOGLE_GENERATIVE_AI_API_KEY` og `GOOGLE_API_KEY` understøttes også. Første ikke-tomme navn bruges i den rækkefølge.
+- `APP_ACCESS_CODE`: en lang, tilfældig adgangskode til billedaflæsning. Indtastes i appen, gemmes ikke i browserstorage og er ikke API-nøglen.
 
-Udgiv på ny efter ændring af miljøvariabler. AI er lukket, indtil både API-nøgle og appkode er sat. Appkoden beskytter den betalte billedaflæsning, ikke de offentlige HTML-billeder. Opsæt forbrugsgrænser hos API-udbyderen før deling. Dette er en personlig prototype, ikke et flerbrugersystem med login og kvoter.
+Modellen er fast `gemini-2.5-flash`, der understøtter billedaflæsning og har en gratis API-kvote. Brug et Google AI Studio-projekt på Free Tier uden betalt fakturering for gratis brug. Appen kan ikke aflæse kontoens faktureringsstatus; samme model kan koste penge med en betalt API-nøgle. Der er ingen automatisk overgang til en anden eller betalt model. Ved 429 stopper forløbet og bevarer allerede aflæste billeder til genoptagelse.
+
+En eksisterende nøgle skal være tilgængelig i Vercel-projektet **badminton**, i det miljø der udgives. Nøgler i et andet projekt deles ikke automatisk. Udgiv på ny efter ændring af miljøvariabler. API-funktionen er lukket indtil både Gemini-nøgle og appkode er sat.
+
+Appkoden beskytter billedaflæsningen, ikke de offentlige HTML-billeder. Dette er en personlig prototype, ikke et flerbrugersystem med login og kvoter. Googles datavilkår afhænger af kontotype og region. Billeder sendes til Google ved tryk på aflæsningsknappen.
+
+Kilder: https://ai.google.dev/gemini-api/docs/pricing og https://ai.google.dev/api/generate-content
 
 ## Billeder og kontrol
 Op til 10 billeder kan vælges på én gang; de aflæses sekventielt for at holde hver forespørgsel under hostinggrænsen. JPG/PNG/WebP op til 12 MB kan gemmes; AI-request må være højst 3,5 MB inklusive base64 (ca. 2,5 MB originalfil). Større billeder giver en tydelig fejl og bliver ikke sendt. Upload mindre screenshots for at bevare læsbarheden.
@@ -25,4 +30,4 @@ Den eksisterende U15-tabel fra ranglistereglementets appendiks B (10. september 
 Data og fotos er lokale i browseren (localStorage/IndexedDB); ingen synkronisering mellem enheder. Brug sikkerhedskopi i Min profil. `index.html` inkluderer de seks oprindelige screenshots.
 
 ## Udvikling
-`src/app.js`, `src/flow.js` og `src/template.html` er kildekoden. `index.html` er den selvstændige samlede app. Serveren bruger Node.js og OpenAI Responses API med JSON-schema. Live AI-aflæsning skal testes med en konfigureret API-nøgle; automatiske tests bruger kontrollerede API-svar.
+`src/app.js`, `src/flow.js` og `src/template.html` er kildekoden. `index.html` er den selvstændige samlede app. Serveren bruger Node.js og Gemini GenerateContent API med struktureret output og servervalidering. Live AI-aflæsning skal testes med en konfigureret API-nøgle; automatiske tests bruger kontrollerede API-svar.
