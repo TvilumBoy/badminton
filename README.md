@@ -6,7 +6,7 @@ Dansk stævneapp: tilføj stævne → Single / Double / Mix → vælg op til 10 
 Importér dette repository som et projekt med framework **Other**. `index.html` er forsiden, og `api/analyze.js` er serverfunktionen. Ingen npm-afhængigheder eller build-kommando kræves.
 
 Indstil servermiljøvariabler i Vercel (aldrig i HTML, kode eller GitHub):
-- `GEMINI_API_KEY`: eksisterende Gemini API-nøgle. `GOOGLE_GENERATIVE_AI_API_KEY` og `GOOGLE_API_KEY` understøttes også. Første ikke-tomme navn bruges i den rækkefølge.
+- `VITE_GEMINI_API_KEY`: eksisterende Gemini API-nøgle, læses kun i serverfunktionen. `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` og `GOOGLE_API_KEY` understøttes også. Første ikke-tomme navn bruges i den rækkefølge. Der bruges ikke Vite eller import.meta.env; nøglens værdi indlejres ikke i frontend.
 - `APP_ACCESS_CODE`: en lang, tilfældig adgangskode til billedaflæsning. Indtastes i appen, gemmes ikke i browserstorage og er ikke API-nøglen.
 
 Modellen er fast `gemini-2.5-flash`, der understøtter billedaflæsning og har en gratis API-kvote. Brug et Google AI Studio-projekt på Free Tier uden betalt fakturering for gratis brug. Appen kan ikke aflæse kontoens faktureringsstatus; samme model kan koste penge med en betalt API-nøgle. Der er ingen automatisk overgang til en anden eller betalt model. Ved 429 stopper forløbet og bevarer allerede aflæste billeder til genoptagelse.
