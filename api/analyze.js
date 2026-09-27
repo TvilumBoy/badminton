@@ -9,8 +9,8 @@ function valid(s,v){if(v===null)return Array.isArray(s.type)&&s.type.includes('n
 module.exports=async(req,res)=>{
  res.setHeader('Cache-Control','no-store');
  if(req.method!=='POST')return res.status(405).json({error:'Brug POST.'});
- const apiKey=process.env.GEMINI_API_KEY||process.env.GOOGLE_GENERATIVE_AI_API_KEY||process.env.GOOGLE_API_KEY;
- if(!apiKey||!process.env.APP_ACCESS_CODE)return res.status(503).json({error:'AI-aflæsning er ikke aktiveret endnu. Ejeren skal konfigurere GEMINI_API_KEY (eller GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY) og APP_ACCESS_CODE på serveren.'});
+ const apiKey=process.env.VITE_GEMINI_API_KEY||process.env.GEMINI_API_KEY||process.env.GOOGLE_GENERATIVE_AI_API_KEY||process.env.GOOGLE_API_KEY;
+ if(!apiKey||!process.env.APP_ACCESS_CODE)return res.status(503).json({error:'AI-aflæsning er ikke aktiveret endnu. Ejeren skal konfigurere VITE_GEMINI_API_KEY (eller GEMINI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY) og APP_ACCESS_CODE på serveren.'});
  const given=Buffer.from(String(req.headers['x-app-code']||'')),expected=Buffer.from(process.env.APP_ACCESS_CODE);
  if(given.length!==expected.length||!timingSafeEqual(given,expected))return res.status(401).json({error:'Adgangskoden til billedaflæsning er forkert.'});
  let b;try{b=typeof req.body==='string'?JSON.parse(req.body):req.body}catch{return res.status(400).json({error:'Ugyldig forespørgsel.'})}
