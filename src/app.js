@@ -18,7 +18,59 @@ const labels={single:'Single',double:'Double',mix:'Mix'};
 const fmt=n=>Number(n).toLocaleString('da-DK');
 const signed=n=>(n>0?'+':'')+n;
 function toast(s){$('#toast').textContent=s;$('#toast').hidden=false;setTimeout(()=>$('#toast').hidden=true,5000)}
-function save(){state.selectedTournament=activeTournament;state.baselines[activeTournament]=structuredClone(state.profile);try{localStorage.setItem(KEY,JSON.stringify(state));$('#save-state').textContent='Gemt i denne browser'}catch{$('#save-state').textContent='Ikke gemt — hent en sikkerhedskopi';toast('Browseren kunne ikke gemme. Hent en sikkerhedskopi, før du lukker siden.')}}
+const CLOUD_CODE_KEY='sehested-badminton-cloud-code';
+let cloudCode=localStorage.getItem(CLOUD_CODE_KEY)||'',cloudReady=false,cloudTimer=null,cloudSaving=false;
+function cloudAuthHeaders(extra={}){return {...extra,'x-app-code':cloudCode}}
+function setCloudStatus(text,ok=false){const s=$('#cloud-status'),b=$('#cloud-badge');if(s)s.textContent=text;if(b){b.textContent=ok?'Sky: forbundet':'Lokal';b.className=ok?'pill good':'pill'}}
+async function cloudSaveNow(){
+ if(!cloudReady||!cloudCode||cloudSaving)return;
+ cloudSaving=true;
+ try{
+  const r=await fetch('/api/state',{method:'PUT',headers:cloudAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify({state})});
+  const body=await r.json().catch(()=>({}));
+  if(!r.ok)throw Error(body.error||'Sky-gemning mislykkedes.');
+  const label=$('#save-state');if(label)label.textContent='Gemt i skyen og på denne enhed';
+  setCloudStatus('Forbundet. Data synkroniseres mellem dine enheder.',true);
+ }catch(e){
+  const label=$('#save-state');if(label)label.textContent='Lokalt gemt · sky-fejl';
+  setCloudStatus(e.message||'Kunne ikke gemme i skyen.');
+ }finally{cloudSaving=false}
+}
+function scheduleCloudSave(){if(!cloudReady||!cloudCode)return;clearTimeout(cloudTimer);cloudTimer=setTimeout(cloudSaveNow,700)}
+async function cloudConnect(code,interactive=true){
+ cloudCode=String(code||'').trim();
+ if(!cloudCode){if(interactive)toast('Indtast adgangskoden.');return false}
+ setCloudStatus('Forbinder til skyen …');
+ try{
+  const r=await fetch('/api/state',{headers:cloudAuthHeaders()});
+  const body=await r.json().catch(()=>({}));
+  if(!r.ok)throw Error(body.error||'Sky-lagring er ikke klar endnu.');
+  cloudReady=true;localStorage.setItem(CLOUD_CODE_KEY,cloudCode);
+  if(body.state){
+   state=body.state;state.baselines ||= {};state.uploads ||= [];state.opponents ||= [];state.aiDrafts ||= {};
+   activeTournament=state.selectedTournament||state.tournaments?.[0]?.id||'hobro';
+   if(state.baselines[activeTournament])state.profile=structuredClone(state.baselines[activeTournament]);
+   try{localStorage.setItem(KEY,JSON.stringify(state))}catch{}
+   migrateOpponents();render();
+  }else{
+   await cloudSaveNow();
+   await cloudUploadExistingImages();
+  }
+  const input=$('#cloud-code');if(input)input.value='';
+  const connect=$('#cloud-connect'),disconnect=$('#cloud-disconnect');if(connect)connect.hidden=true;if(disconnect)disconnect.hidden=false;
+  const field=$('#cloud-code-field');if(field)field.hidden=true;
+  setCloudStatus('Forbundet. Dine resultater og billeder gemmes nu online.',true);
+  return true;
+ }catch(e){
+  cloudReady=false;setCloudStatus(e.message||'Kunne ikke forbinde til skyen.');if(interactive)toast(e.message||'Kunne ikke forbinde til skyen.');return false
+ }
+}
+function cloudDisconnect(){
+ cloudReady=false;cloudCode='';localStorage.removeItem(CLOUD_CODE_KEY);
+ const connect=$('#cloud-connect'),disconnect=$('#cloud-disconnect'),field=$('#cloud-code-field');if(connect)connect.hidden=false;if(disconnect)disconnect.hidden=true;if(field)field.hidden=false;
+ setCloudStatus('Denne enhed bruger kun lokal lagring, indtil du forbinder igen.');
+}
+function save(){state.selectedTournament=activeTournament;state.baselines[activeTournament]=structuredClone(state.profile);try{localStorage.setItem(KEY,JSON.stringify(state));const label=$('#save-state');if(label)label.textContent=cloudReady?'Gemmer i skyen …':'Gemt i denne browser';scheduleCloudSave()}catch{const label=$('#save-state');if(label)label.textContent='Ikke gemt — hent en sikkerhedskopi';toast('Browseren kunne ikke gemme. Hent en sikkerhedskopi, før du lukker siden.')}}
 // Appendiks B, Reglement for Rangliste 2026-09-10: [minDifference, unexpectedLoss, unexpectedWin, youthExpectedLoss, expectedWin].
 const POINT_TABLE=[[0,8,14,6,14],[25,10,16,6,13],[50,12,18,5,12],[75,14,20,5,11],[100,16,22,4,10],[150,18,24,4,9],[200,18,26,0,8],[250,18,28,0,7],[300,18,30,0,6],[350,20,32,0,5],[400,20,32,0,4]];
 function pointChange(ours,theirs,result){const diff=Math.abs(ours-theirs),row=POINT_TABLE.filter(r=>diff>=r[0]).at(-1);if(result==='win')return ours<theirs?row[2]:row[4];if(result==='loss')return -(ours>theirs?row[1]:row[3])||0;return null}
@@ -38,8 +90,37 @@ function proposalsFromText(text){const lines=text.split('\n').map(s=>s.trim()).f
 let proposals=[];
 function parseText(){if($('#upload-discipline').value!=='single'){proposals=[];$('#proposals').hidden=false;$('#proposals').textContent='Double- og mixkampe skal indtastes via Tilføj kamp manuelt. Brug den aflæste tekst som støtte.';return}const text=$('#ocr-text').value;proposals=proposalsFromText(text);$('#proposals').innerHTML=proposals.length?proposals.map((m,i)=>`<div class="list-row"><div><strong>${esc(m.opponent)}</strong><small>${esc(m.scores)} · ${m.result==='loss'?'Nederlag':m.result==='win'?'Sejr':'Kontrollér resultat'}</small></div><button class="secondary" data-proposal="${i}">Kontrollér</button></div>`).join(''):'<p>Ingen komplette kampe genkendt. Brug »Tilføj kamp« eller »Min profil«, og udfyld oplysningerne fra billedet. Teksten herover kan rettes.</p>';$('#proposals').hidden=false}
 async function db(){return new Promise((resolve,reject)=>{const r=indexedDB.open('badminton-billeder-v1',1);r.onupgradeneeded=()=>r.result.createObjectStore('images');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
-async function imagePut(id,file){const d=await db();return new Promise((resolve,reject)=>{const t=d.transaction('images','readwrite');t.objectStore('images').put(file,id);t.oncomplete=()=>{d.close();resolve()};t.onerror=()=>{d.close();reject(t.error)}})}
-async function imageGet(id){const d=await db();return new Promise((resolve,reject)=>{const t=d.transaction('images'),r=t.objectStore('images').get(id);r.onsuccess=()=>{d.close();resolve(r.result)};r.onerror=()=>reject(r.error)})}
+async function localImagePut(id,file){const d=await db();return new Promise((resolve,reject)=>{const t=d.transaction('images','readwrite');t.objectStore('images').put(file,id);t.oncomplete=()=>{d.close();resolve()};t.onerror=()=>{d.close();reject(t.error)}})}
+async function localImageGet(id){const d=await db();return new Promise((resolve,reject)=>{const t=d.transaction('images'),r=t.objectStore('images').get(id);r.onsuccess=()=>{d.close();resolve(r.result)};r.onerror=()=>reject(r.error)})}
+async function cloudImagePut(id,file){
+ if(!cloudReady||!cloudCode)return;
+ if(file.size>3000000)throw Error('Billedet er for stort til online-lagring. Brug et screenshot på højst ca. 3 MB.');
+ const data=await imageData(file);
+ const r=await fetch('/api/image',{method:'POST',headers:cloudAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify({id,image:data})});
+ const body=await r.json().catch(()=>({}));if(!r.ok)throw Error(body.error||'Billedet kunne ikke gemmes online.');
+}
+async function cloudImageGet(id){
+ if(!cloudReady||!cloudCode)return null;
+ const r=await fetch('/api/image?id='+encodeURIComponent(id),{headers:cloudAuthHeaders()});
+ if(r.status===404)return null;if(!r.ok)return null;return await r.blob();
+}
+async function cloudImageDelete(id){
+ if(!cloudReady||!cloudCode)return;
+ await fetch('/api/image?id='+encodeURIComponent(id),{method:'DELETE',headers:cloudAuthHeaders()}).catch(()=>{});
+}
+async function cloudUploadExistingImages(){
+ if(!cloudReady)return;
+ const uploads=state.uploads||[];
+ let done=0;
+ for(const u of uploads){
+  if(String(u.id).startsWith('seed-'))continue;
+  const file=await localImageGet(u.id).catch(()=>null);if(!file)continue;
+  try{await cloudImagePut(u.id,file);done++}catch{}
+ }
+ if(done)setCloudStatus('Forbundet. '+done+' eksisterende billeder er også lagt i skyen.',true);
+}
+async function imagePut(id,file){await localImagePut(id,file);if(cloudReady){try{await cloudImagePut(id,file)}catch(e){toast(e.message||'Billedet blev kun gemt lokalt.')}}}
+async function imageGet(id){let file=await localImageGet(id).catch(()=>null);if(file)return file;file=await cloudImageGet(id);if(file){try{await localImagePut(id,file)}catch{}return file}return null}
 async function showImage(id){let src;if(id.startsWith('seed-'))src=SEED_IMAGES[Number(id.split('-')[1])];else{const b=await imageGet(id);if(!b){toast('Billedet findes ikke i denne browser.');return}src=URL.createObjectURL(b)}$('#large-image').src=src;$('#image-dialog').showModal()}
 async function recognize(){if(!uploadImage){toast('Vælg et billede først.');return}if(ocrBusy)return;ocrBusy=true;$('#read-image').disabled=true;$('#ocr-status').textContent='Starter tekstgenkendelse …';let worker;try{if(!window.Tesseract)await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';script.onload=resolve;script.onerror=reject;document.head.append(script);setTimeout(()=>reject(new Error('timeout')),20000)});worker=await Tesseract.createWorker('eng',1,{logger:m=>{$('#ocr-status').textContent=m.status==='recognizing text'?`Aflæser tekst: ${Math.round(m.progress*100)} %`:'Henter tekstlæser …'}});const r=await worker.recognize(uploadImage);$('#ocr-text').value=r.data.text;$('#ocr-status').textContent='Teksten er aflæst. Kontrollér navne, tal og disciplin, før du gemmer.';parseText()}catch{$('#ocr-status').textContent='Tekstlæseren kunne ikke starte. Du kan stadig se billedet og indtaste kampene manuelt. Første opstart kræver internet.'}finally{if(worker)await worker.terminate();ocrBusy=false;$('#read-image').disabled=false}}
 function init(){migrateOpponents();render();initOpponents();document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>changeView(b.dataset.view));$('#tournament-select').onchange=e=>{state.baselines[activeTournament]=structuredClone(state.profile);activeTournament=e.target.value;state.profile=structuredClone(state.baselines[activeTournament]||{...state.profile,confirmed:false});save();render()};$('#filter').onchange=e=>{activeDiscipline=e.target.value;renderMatches()};$('#new-match').onclick=()=>openMatch();$('#upload-new-match').onclick=()=>openMatch();$('#profile-form').onsubmit=e=>{e.preventDefault();const p=state.profile;for(const k of ['name','id','club','date'])p[k]=$('#p-'+k).value.trim();for(const k of ['single','double','mix','singleCount','doubleCount','mixCount'])p[k]=$('#p-'+k).value===''?'':Number($('#p-'+k).value);p.confirmed=$('#p-confirmed').checked;save();render();toast('Profilen er gemt.');changeView('overview')};$('#m-discipline').onchange=e=>$('#double-fields').hidden=e.target.value==='single';$('#derive-result').onclick=()=>{const r=resultFromScores($('#m-scores').value);if(r)$('#m-result').value=r;else toast('Skriv mindst to afsluttede sæt med dine point først, fx 15-8, 15-10.');};$('#match-form').onsubmit=e=>{e.preventDefault();const m={};for(const k of ['id','tournament','discipline','opponent','club','round','scores','points','partnerPoints','opponentPartnerPoints','result','status','notes','opponentId'])m[k]=$('#m-'+k).value.trim();m.confirmed=$('#m-confirmed').checked;if(m.opponentId){const o=state.opponents.find(o=>o.id===m.opponentId);if(!o||o.name!==m.opponent){toast('Navnet og den valgte modstander er forskellige. Vælg den rigtige spiller eller fjern tilknytningen.');return}}const inferred=resultFromScores(m.scores);if(m.status==='normal'&&inferred&&m.result!==inferred){toast('Resultatet og sætscoren er uenige. Ret dem før du gemmer.');return}if(!m.id){const duplicate=state.matches.find(x=>x.tournament===m.tournament&&x.discipline===m.discipline&&x.opponent.toLowerCase()===m.opponent.toLowerCase()&&x.round===m.round&&x.scores.replace(/\s/g,'')===m.scores.replace(/\s/g,''));if(duplicate){toast('Denne kamp findes allerede. Ret den eksisterende kamp under Kampe.');return}m.id='match-'+Date.now()}const index=state.matches.findIndex(x=>x.id===m.id);index<0?state.matches.push(m):state.matches[index]=m;save();$('#match-dialog').close();render();toast('Kampen er gemt.');};$('#delete-match').onclick=()=>{if(confirm('Vil du fjerne denne kamp fra testappen?')){state.matches=state.matches.filter(m=>m.id!==$('#m-id').value);save();$('#match-dialog').close();render()}};document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.edit)openMatch(b.dataset.edit);if(b.dataset.opponent){selectedOpponent=b.dataset.opponent;changeView('opponents')}if(b.dataset.image)showImage(b.dataset.image).catch(()=>toast('Billedet kunne ikke åbnes.'));if(b.dataset.proposal!==undefined)openMatch(null,proposals[Number(b.dataset.proposal)]);if(b.dataset.close)$('#'+b.dataset.close).close()});$('#file-input').onchange=async e=>{const file=e.target.files[0];if(!file)return;if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size>12*1024*1024){toast('Vælg JPG, PNG eller WebP på højst 12 MB.');return}uploadImage=file;$('#upload-preview').src=URL.createObjectURL(file);$('#upload-preview').hidden=false;$('#read-image').disabled=false;$('#ocr-text').value='';$('#proposals').hidden=true;$('#ocr-status').textContent='Billedet er klar. Tryk Aflæs tekst.';const id='upload-'+Date.now();try{await imagePut(id,file);state.uploads.push({id,name:file.name,date:new Date().toLocaleDateString('da-DK')});const oid=$('#upload-opponent').value;if(oid){const o=state.opponents.find(o=>o.id===oid);o.images.push({id,date:new Date().toISOString().slice(0,10),label:file.name})}save();renderSources()}catch{toast('Billedet kan aflæses nu, men kunne ikke gemmes i browseren.')}};$('#read-image').onclick=recognize;$('#parse-text').onclick=parseText;$('#export').onclick=async()=>{try{const images=[];for(const u of state.uploads){const b=await imageGet(u.id);if(b){const data=await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)});images.push({id:u.id,data})}}const blob=new Blob([JSON.stringify({app:'Badmintonpoint',version:2,state,images},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='badminton-sikkerhedskopi.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}catch{toast('Sikkerhedskopien kunne ikke oprettes.')}};$('#import').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;const data=JSON.parse(await f.text());if(data.app!=='Badmintonpoint'||data.version!==2||!data.state?.profile||!Array.isArray(data.state.matches)||!Array.isArray(data.state.tournaments)||!data.state.tournaments.length)throw Error();if(!confirm('Erstat de aktuelle data med sikkerhedskopien?'))return;for(const im of data.images||[]){if(!/^data:image\/(png|jpeg|webp);base64,/.test(im.data))throw Error();const b=await(await fetch(im.data)).blob();await imagePut(im.id,b)}state=data.state;migrateOpponents();activeTournament=state.selectedTournament||state.tournaments[0].id;if(state.baselines[activeTournament])state.profile=structuredClone(state.baselines[activeTournament]);save();render();toast('Sikkerhedskopien er indlæst.')}catch{toast('Filen kunne ikke indlæses som en sikkerhedskopi.')}e.target.value=''};$('#new-tournament').onclick=()=>$('#tournament-dialog').showModal();$('#tournament-form').onsubmit=e=>{e.preventDefault();const t={id:'event-'+Date.now(),name:$('#t-name').value.trim(),date:$('#t-date').value,number:$('#t-number').value.trim(),level:$('#t-level').value};state.baselines[activeTournament]=structuredClone(state.profile);state.tournaments.push(t);activeTournament=t.id;state.profile={...state.profile,confirmed:false};save();render();$('#tournament-dialog').close();$('#tournament-form').reset();toast('Stævnet er oprettet.')}}
