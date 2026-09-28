@@ -69,7 +69,8 @@ function opponentDetail(o){const ms=opponentMatches(o.id);return `<div class="be
 function initOpponents(){$('#opponent-search').oninput=e=>{opponentQuery=e.target.value;renderOpponents()};$('#m-opponentId').onchange=e=>{const o=state.opponents.find(o=>o.id===e.target.value);if(o){$('#m-opponent').value=o.name;$('#m-club').value=o.club;if(!$('#m-id').value){$('#m-points').value='';toast('Spilleren er valgt. Angiv point, der gælder for den nye kamp.')}}};document.addEventListener('click',e=>{if(e.target.closest('#add-opponent-image'))$('#opponent-image-input').click()});$('#opponent-image-input').onchange=async e=>{const o=state.opponents.find(o=>o.id===selectedOpponent);let saved=0;for(const f of e.target.files){if(!/^image\/(jpeg|png|webp)$/.test(f.type)||f.size>12*1024*1024){toast('Kun JPG, PNG og WebP på højst 12 MB.');continue}const id='op-image-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);try{await imagePut(id,f);const date=new Date().toISOString().slice(0,10);state.uploads.push({id,name:f.name,date});o.images.push({id,label:f.name,date});saved++}catch{toast('Et billede kunne ikke gemmes.')}}if(saved){save();renderOpponents();renderSources();toast(`${saved} billeder gemt på ${o.name}.`)}e.target.value=''};$('#new-opponent').onclick=()=>{$('#opponent-form').reset();$('#opponent-dialog').showModal()};$('#opponent-form').onsubmit=e=>{e.preventDefault();const id=$('#o-id').value.trim();if(state.opponents.some(o=>o.id===id)){toast('BadmintonID findes allerede. Søg spilleren frem.');return}state.opponents.push({id,name:$('#o-name').value.trim(),club:$('#o-club').value.trim(),images:[],date:'',single:'',double:'',mix:''});selectedOpponent=id;save();renderOpponents();$('#opponent-dialog').close();toast('Modstanderen er oprettet. Du kan nu tilføje profilbilleder.')}}
 
 if(typeof document!=='undefined')init();
-\n// Stævne → disciplin → op til 15 screenshots. Existing storage is preserved.
+
+// Stævne → disciplin → op til 15 screenshots. Existing storage is preserved.
 let batchFiles=[],batchBusy=false;
 state.aiDrafts ||= {};
 const draftKey=()=>activeTournament+':'+activeDiscipline;
@@ -125,7 +126,7 @@ function renderFlow(){
   const results=batchFiles.filter(f=>f.role==='result');$('#double-result-name').textContent=results.length?results.map(f=>f.file.name).join(', '):'Ingen kampbilleder valgt.';
   $('#double-batch-count').textContent=`${batchFiles.length} af 15 billeder valgt · ${doubleReady()?'klar til samlet aflæsning':'mangler et eller flere nødvendige billeder'}`;
  }
- $('#batch-analyze').textContent=isDouble?'Start samlet aflæsning med Groq':'Aflæs billeder med Gemini';
+ $('#batch-analyze').textContent=isDouble?'Start samlet aflæsning med Groq':'Aflæs billeder med Groq';
  $('#batch-analyze').disabled=batchBusy||(isDouble?!doubleReady():!batchFiles.length);
  $('#batch-input').disabled=batchBusy;
  ['self','partner','opponent1','opponent2','result'].forEach(role=>{const el=$('#double-'+role+'-input');if(el)el.disabled=batchBusy});
@@ -155,7 +156,7 @@ function initFlow(){
  $('#event-back').onclick=()=>changeView('home');$('#discipline-back').onclick=()=>openEvent(activeTournament);$('#discipline-add').onclick=()=>openMatch();
  $('#tournament-select').onchange=e=>openEvent(e.target.value);
  const oldSubmit=$('#tournament-form').onsubmit;$('#tournament-form').onsubmit=e=>{oldSubmit(e);view='event';activeDiscipline='all';render()};
- $('#batch-input').onchange=async e=>{const files=[...e.target.files];e.target.value='';if(files.length>15)return toast('Vælg højst 15 billeder ad gangen.');if(files.some(f=>!/^image\/(jpeg|png|webp)$/.test(f.type)||f.size>12*1024*1024))return toast('Brug JPG, PNG eller WebP på højst 12 MB pr. billede.');batchFiles=[];for(const file of files){try{batchFiles.push(await storeBatchFile(file,'general'))}catch{toast('Et billede kunne ikke gemmes.')}}save();renderFlow();$('#batch-status').textContent='Billederne er gemt. AI-aflæsning sender de valgte billeder til Google Gemini.'};
+ $('#batch-input').onchange=async e=>{const files=[...e.target.files];e.target.value='';if(files.length>15)return toast('Vælg højst 15 billeder ad gangen.');if(files.some(f=>!/^image\/(jpeg|png|webp)$/.test(f.type)||f.size>12*1024*1024))return toast('Brug JPG, PNG eller WebP på højst 12 MB pr. billede.');batchFiles=[];for(const file of files){try{batchFiles.push(await storeBatchFile(file,'general'))}catch{toast('Et billede kunne ikke gemmes.')}}save();renderFlow();$('#batch-status').textContent='Billederne er gemt. AI-aflæsning sender de valgte billeder til Groq Cloud.'};
  $('#double-self-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('self',files)};
  $('#double-partner-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('partner',files)};
  $('#double-opponent1-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('opponent1',files)};
