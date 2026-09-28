@@ -40,7 +40,7 @@ const roleText=role=>({
   partner:'This screenshot is the doubles partner profile from today.',
   opponent1:'This screenshot is opponent 1 profile from today.',
   opponent2:'This screenshot is opponent 2 profile from today.',
-  result:'This screenshot contains match/program/result evidence.',
+  result:'This is specifically a BadmintonPlayer match/program/result screenshot. Read every visible score. A score like 15/11,15/9 belongs to the immediately preceding two pairs and MUST be returned as sets [{a:15,b:11},{a:15,b:9}]. Do not leave sets empty when such a numeric score is visible.',
   general:'The screenshot role is not predetermined.'
 }[role]||'The screenshot role is not predetermined.');
 
