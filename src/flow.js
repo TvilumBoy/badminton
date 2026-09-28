@@ -34,7 +34,7 @@ async function setDoubleSlot(role,files){
  }catch(e){toast(e.message||'Et billede kunne ikke gemmes.')}
 }
 function scopedUploads(){return state.uploads.filter(u=>u.tournament===activeTournament&&u.discipline===activeDiscipline)}
-async function imageDelete(id){try{const d=await db();await new Promise((resolve,reject)=>{const t=d.transaction('images','readwrite');t.objectStore('images').delete(id);t.oncomplete=resolve;t.onerror=()=>reject(t.error)});d.close()}catch{}}
+async function imageDelete(id){try{const d=await db();await new Promise((resolve,reject)=>{const t=d.transaction('images','readwrite');t.objectStore('images').delete(id);t.oncomplete=resolve;t.onerror=()=>reject(t.error)});d.close()}catch{}try{await cloudImageDelete(id)}catch{}}
 function roleLabel(role){return doubleRoles[role]||({result:'Kamp/resultat',general:'Billede'}[role]||'Billede')}
 function clearOwnDiscipline(){state.profile[activeDiscipline]='';const countKey=activeDiscipline+'Count';if(countKey in state.profile)state.profile[countKey]='';state.profile.confirmed=false}
 function clearOpponentDisciplineByEvidence(ids){
@@ -228,6 +228,8 @@ function initFlow(){
  const oldChange=changeView;changeView=function(v){if(batchBusy)return toast('Vent til aflæsningen er færdig.');oldChange(v)};
  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>changeView(b.dataset.view));
  $('#home-add').onclick=()=>$('#tournament-dialog').showModal();
+ $('#cloud-connect').onclick=()=>cloudConnect($('#cloud-code').value,true);
+ $('#cloud-disconnect').onclick=cloudDisconnect;
  $('#event-back').onclick=()=>changeView('home');$('#discipline-back').onclick=()=>openEvent(activeTournament);$('#discipline-add').onclick=()=>openMatch();$('#reset-discipline').onclick=resetActiveDiscipline;
  $('#open-discipline-uploads').onclick=()=>changeView('discipline-uploads');$('#uploads-back').onclick=()=>changeView('discipline');$('#recalculate-discipline').onclick=recalculateActiveDiscipline;
  $('#open-discipline-players').onclick=()=>changeView('discipline-players');$('#players-back').onclick=()=>changeView('discipline');
@@ -244,6 +246,7 @@ function initFlow(){
  document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.editAiPlayer!==undefined){openAiPlayerEditor(Number(b.dataset.editAiPlayer));return}if(b.dataset.deleteUpload){if(confirm('Slet dette billede og den aflæsning, der kommer fra det?'))deleteEvidenceImage(b.dataset.deleteUpload);return}if(b.dataset.deleteAiPlayer!==undefined){if(confirm('Fjern denne aflæste spillerprofil? Billedet bevares.'))removeAiPlayerAt(Number(b.dataset.deleteAiPlayer));return}if(b.dataset.deleteAiMatch!==undefined){if(confirm('Fjern dette aflæste kampresultat? Billedet bevares.'))removeAiMatchAt(Number(b.dataset.deleteAiMatch));return}if(b.dataset.deleteSavedMatch){if(confirm('Slet denne gemte kamp?')){state.matches=state.matches.filter(m=>m.id!==b.dataset.deleteSavedMatch);save();render()}return}if(b.dataset.event)openEvent(b.dataset.event);if(b.dataset.discipline)openDiscipline(b.dataset.discipline);if(b.dataset.aiMatch!==undefined){const p=aiProposals[Number(b.dataset.aiMatch)];const existing=state.matches.filter(m=>m.tournament===activeTournament&&m.discipline===activeDiscipline&&norm(m.opponent)===norm(p.opponent)&&m.round===p.round);if(existing.length===1){const m=existing[0];openMatch(m.id,{...m,...p,id:m.id,notes:m.notes,points:p.points||m.points,partnerPoints:p.partnerPoints||m.partnerPoints,opponentPartnerPoints:p.opponentPartnerPoints||m.opponentPartnerPoints})}else openMatch(null,p)}
  if(b.dataset.aiPlayer!==undefined){const p=combinedPlayers(state.aiDrafts[draftKey()])[Number(b.dataset.aiPlayer)];if(samePlayer(p,state.profile)){if(p.conflicts.includes(activeDiscipline))return toast('Billederne viser forskellige point. Indtast de rigtige startpoint i Min profil.');state.profile[activeDiscipline]=p[activeDiscipline]??'';state.profile.confirmed=false;if(p.date)state.profile.date=p.date;save();changeView('profile');return}if(!p.id)return toast('Spiller-ID mangler. Opret profilen manuelt under Modstandere.');let o=state.opponents.find(o=>o.id===p.id);if(!o){o={id:p.id,name:p.name,club:p.club,images:[],aiCreated:true};state.opponents.push(o)}for(const d of Object.keys(labels))if(p[d]!=null&&!p.conflicts.includes(d))o[d]=p[d];o.date=p.date;o.aiSource={tournament:activeTournament,discipline:activeDiscipline,images:[...p.images]};for(const id of p.images)if(!o.images.some(im=>im.id===id))o.images.push({id,date:p.date,label:'Aflæst spillerprofil'});save();renderDraft();toast('Profil og billeder er gemt. Kontrollér pointene på hver kamp.')}});
  view='home';render();
+ if(cloudCode)cloudConnect(cloudCode,false);
 }
 initFlow();
 // Track both opponents in doubles/mix, including after editing notes.
