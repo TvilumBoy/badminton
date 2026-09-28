@@ -1,4 +1,4 @@
-// Stævne → disciplin → op til 10 screenshots. Existing storage is preserved.
+// Stævne → disciplin → op til 15 screenshots. Existing storage is preserved.
 let batchFiles=[],batchBusy=false;
 state.aiDrafts ||= {};
 const draftKey=()=>activeTournament+':'+activeDiscipline;
@@ -18,7 +18,7 @@ async function storeBatchFile(file,role){
 async function setDoubleSlot(role,files){
  try{
   if(role==='result'){
-   if(files.length>6)return toast('Vælg højst 6 billeder af kamp og resultat.');
+   if(files.length>11)return toast('Vælg højst 11 billeder af kamp og resultat.');
    batchFiles=batchFiles.filter(f=>f.role!=='result');
    for(const file of files)batchFiles.push(await storeBatchFile(file,'result'));
   }else{
@@ -26,9 +26,9 @@ async function setDoubleSlot(role,files){
    batchFiles=batchFiles.filter(f=>f.role!==role);
    batchFiles.push(await storeBatchFile(files[0],role));
   }
-  if(batchFiles.length>10){batchFiles=batchFiles.slice(0,10);return toast('Der kan højst bruges 10 billeder i alt.')}
+  if(batchFiles.length>15){batchFiles=batchFiles.slice(0,15);return toast('Der kan højst bruges 15 billeder i alt.')}
   save();renderFlow();
-  $('#batch-status').textContent=doubleReady()?'Alle nødvendige Double-billeder er valgt. Tryk “Start samlet aflæsning med Gemini”.':'Billederne er gemt. Vælg de resterende Double-billeder.';
+  $('#batch-status').textContent=doubleReady()?'Alle nødvendige Double-billeder er valgt. Tryk “Start samlet aflæsning med Groq”.':'Billederne er gemt. Vælg de resterende Double-billeder.';
  }catch(e){toast(e.message||'Et billede kunne ikke gemmes.')}
 }
 const oldRender=render;
@@ -46,15 +46,15 @@ function renderFlow(){
  const isDouble=activeDiscipline==='double';
  $('#standard-batch-upload').hidden=isDouble;
  $('#double-batch-upload').hidden=!isDouble;
- $('#batch-heading').textContent=isDouble?'1. Upload profiler og kamp/resultat':'1. Upload op til 10 billeder';
+ $('#batch-heading').textContent=isDouble?'1. Upload profiler og kamp/resultat':'1. Upload op til 15 billeder';
  $('#batch-list').innerHTML=batchFiles.map(f=>`<li>${esc(f.file.name)}</li>`).join('');
- $('#batch-count').textContent=`${batchFiles.length} af 10 billeder valgt`;
+ $('#batch-count').textContent=`${batchFiles.length} af 15 billeder valgt`;
  if(isDouble){
   for(const role of Object.keys(doubleRoles)){const f=doubleFile(role);$('#double-'+role+'-name').textContent=f?f.file.name:'Intet billede valgt.'}
   const results=batchFiles.filter(f=>f.role==='result');$('#double-result-name').textContent=results.length?results.map(f=>f.file.name).join(', '):'Ingen kampbilleder valgt.';
-  $('#double-batch-count').textContent=`${batchFiles.length} af 10 billeder valgt · ${doubleReady()?'klar til samlet aflæsning':'mangler et eller flere nødvendige billeder'}`;
+  $('#double-batch-count').textContent=`${batchFiles.length} af 15 billeder valgt · ${doubleReady()?'klar til samlet aflæsning':'mangler et eller flere nødvendige billeder'}`;
  }
- $('#batch-analyze').textContent=isDouble?'Start samlet aflæsning med Gemini':'Aflæs billeder med Gemini';
+ $('#batch-analyze').textContent=isDouble?'Start samlet aflæsning med Groq':'Aflæs billeder med Gemini';
  $('#batch-analyze').disabled=batchBusy||(isDouble?!doubleReady():!batchFiles.length);
  $('#batch-input').disabled=batchBusy;
  ['self','partner','opponent1','opponent2','result'].forEach(role=>{const el=$('#double-'+role+'-input');if(el)el.disabled=batchBusy});
@@ -75,7 +75,8 @@ function renderDraft(){const draft=state.aiDrafts[draftKey()],ps=combinedPlayers
  $('#ai-matches').innerHTML=aiProposals.map((p,i)=>`<article class="review-player"><strong>${esc(p.opponent)}</strong><p>${esc(p.scores||'Planlagt')} · ${p.result==='win'?'Sejr':p.result==='loss'?'Nederlag':'Afventer'}</p><p>Modstanderpoint: ${esc(p.points||'mangler')}${activeDiscipline!=='single'?' / '+esc(p.opponentPartnerPoints||'mangler')+' · Makker: '+esc(p.partnerPoints||'mangler'):''}</p><button class="secondary" data-ai-match="${i}">Kontrollér og gem kamp</button><button class="link-btn" data-image="${esc(p.sourceImage)}">Se resultatbillede</button></article>`).join('')||'<p>Ingen entydige kampe fundet for din spiller og denne disciplin. Kontrollér din spillerprofil, eller tilføj kampen manuelt.</p>';
 }
 async function imageData(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
-async function requestImage(file){let data=await imageData(file);if(data.length>3500000)throw Error(file.name+': Billedet fylder for meget til AI-aflæsning. Brug et screenshot på højst ca. 2,5 MB.');const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json','x-app-code':$('#ai-code').value},body:JSON.stringify({image:data,discipline:activeDiscipline})});let body;try{body=await r.json()}catch{throw Error('AI-serveren er ikke tilgængelig på denne adresse. Appen skal køre på Vercel med AI aktiveret.')}if(!r.ok)throw Error(body.error||'Aflæsning mislykkedes.');return body}
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function requestImage(file,role='general',onWait=null){let data=await imageData(file);if(data.length>3500000)throw Error(file.name+': Billedet fylder for meget til AI-aflæsning. Brug et screenshot på højst ca. 2,5 MB.');for(let attempt=0;attempt<8;attempt++){const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json','x-app-code':$('#ai-code').value},body:JSON.stringify({image:data,discipline:activeDiscipline,role})});let body;try{body=await r.json()}catch{throw Error('AI-serveren er ikke tilgængelig på denne adresse. Appen skal køre på Vercel med AI aktiveret.')}if(r.status===429&&attempt<7){const wait=Math.max(5,Number(body.retryAfterSeconds||20));if(wait>90)throw Error(body.error||'Den gratis dagskvote er nået. Prøv igen senere.');if(onWait)onWait(wait);await sleep((wait+1)*1000);continue}if(!r.ok)throw Error(body.error||'Aflæsning mislykkedes.');return body}throw Error('Groq kunne ikke fortsætte efter flere automatiske forsøg.')}
 function initFlow(){
  const oldChange=changeView;changeView=function(v){if(batchBusy)return toast('Vent til aflæsningen er færdig.');oldChange(v)};
  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>changeView(b.dataset.view));
@@ -83,13 +84,13 @@ function initFlow(){
  $('#event-back').onclick=()=>changeView('home');$('#discipline-back').onclick=()=>openEvent(activeTournament);$('#discipline-add').onclick=()=>openMatch();
  $('#tournament-select').onchange=e=>openEvent(e.target.value);
  const oldSubmit=$('#tournament-form').onsubmit;$('#tournament-form').onsubmit=e=>{oldSubmit(e);view='event';activeDiscipline='all';render()};
- $('#batch-input').onchange=async e=>{const files=[...e.target.files];e.target.value='';if(files.length>10)return toast('Vælg højst 10 billeder ad gangen.');if(files.some(f=>!/^image\/(jpeg|png|webp)$/.test(f.type)||f.size>12*1024*1024))return toast('Brug JPG, PNG eller WebP på højst 12 MB pr. billede.');batchFiles=[];for(const file of files){try{batchFiles.push(await storeBatchFile(file,'general'))}catch{toast('Et billede kunne ikke gemmes.')}}save();renderFlow();$('#batch-status').textContent='Billederne er gemt. AI-aflæsning sender de valgte billeder til Google Gemini.'};
+ $('#batch-input').onchange=async e=>{const files=[...e.target.files];e.target.value='';if(files.length>15)return toast('Vælg højst 15 billeder ad gangen.');if(files.some(f=>!/^image\/(jpeg|png|webp)$/.test(f.type)||f.size>12*1024*1024))return toast('Brug JPG, PNG eller WebP på højst 12 MB pr. billede.');batchFiles=[];for(const file of files){try{batchFiles.push(await storeBatchFile(file,'general'))}catch{toast('Et billede kunne ikke gemmes.')}}save();renderFlow();$('#batch-status').textContent='Billederne er gemt. AI-aflæsning sender de valgte billeder til Google Gemini.'};
  $('#double-self-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('self',files)};
  $('#double-partner-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('partner',files)};
  $('#double-opponent1-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('opponent1',files)};
  $('#double-opponent2-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('opponent2',files)};
  $('#double-result-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('result',files)};
- $('#batch-analyze').onclick=async()=>{if(batchBusy||!batchFiles.length)return;if(activeDiscipline==='double'&&!doubleReady())return toast('Vælg først din profil, din makkers profil, begge modstanderes profiler og mindst ét kamp/resultat-billede.');if(!$('#ai-code').value)return toast('Indtast adgangskoden til AI-aflæsning.');batchBusy=true;renderFlow();const key=draftKey();state.aiDrafts[key] ||= {results:[]};let failed=0;for(let i=0;i<batchFiles.length;i++){const f=batchFiles[i];if(state.aiDrafts[key].results.some(r=>r.id===f.id))continue;const roleText=f.role&&doubleRoles[f.role]?doubleRoles[f.role]:f.role==='result'?'Kamp/resultat':'';$('#batch-status').textContent=`Aflæser billede ${i+1} af ${batchFiles.length}${roleText?' · '+roleText:''} …`;try{const data=await requestImage(f.file);state.aiDrafts[key].results.push({id:f.id,role:f.role,data});save();renderDraft()}catch(e){failed++;$('#batch-status').textContent=e.message;break}}batchBusy=false;renderFlow();if(!failed)$('#batch-status').textContent='Den samlede aflæsning er klar. Kontrollér de fire profiler og kampen nedenfor. AI kan tage fejl.'};
+ $('#batch-analyze').onclick=async()=>{if(batchBusy||!batchFiles.length)return;if(activeDiscipline==='double'&&!doubleReady())return toast('Vælg først din profil, din makkers profil, begge modstanderes profiler og mindst ét kamp/resultat-billede.');if(!$('#ai-code').value)return toast('Indtast adgangskoden til AI-aflæsning.');batchBusy=true;renderFlow();const key=draftKey();state.aiDrafts[key] ||= {results:[]};let failed=0;for(let i=0;i<batchFiles.length;i++){const f=batchFiles[i];if(state.aiDrafts[key].results.some(r=>r.id===f.id))continue;const roleText=f.role&&doubleRoles[f.role]?doubleRoles[f.role]:f.role==='result'?'Kamp/resultat':'';$('#batch-status').textContent=`Aflæser billede ${i+1} af ${batchFiles.length}${roleText?' · '+roleText:''} …`;try{const data=await requestImage(f.file,f.role||'general',wait=>{$('#batch-status').textContent=`Groqs gratis hastighedsgrænse er nået. Venter ${wait} sekunder og fortsætter automatisk med billede ${i+1} af ${batchFiles.length} …`});state.aiDrafts[key].results.push({id:f.id,role:f.role,data});save();renderDraft()}catch(e){failed++;$('#batch-status').textContent=e.message;break}}batchBusy=false;renderFlow();if(!failed)$('#batch-status').textContent='Den samlede aflæsning er klar. Kontrollér de fire profiler og kampen nedenfor. AI kan tage fejl.'};
  document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.event)openEvent(b.dataset.event);if(b.dataset.discipline)openDiscipline(b.dataset.discipline);if(b.dataset.aiMatch!==undefined){const p=aiProposals[Number(b.dataset.aiMatch)];const existing=state.matches.filter(m=>m.tournament===activeTournament&&m.discipline===activeDiscipline&&norm(m.opponent)===norm(p.opponent)&&m.round===p.round);if(existing.length===1){const m=existing[0];openMatch(m.id,{...m,...p,id:m.id,notes:m.notes,points:p.points||m.points,partnerPoints:p.partnerPoints||m.partnerPoints,opponentPartnerPoints:p.opponentPartnerPoints||m.opponentPartnerPoints})}else openMatch(null,p)}
  if(b.dataset.aiPlayer!==undefined){const p=combinedPlayers(state.aiDrafts[draftKey()])[Number(b.dataset.aiPlayer)];if(samePlayer(p,state.profile)){if(p.conflicts.includes(activeDiscipline))return toast('Billederne viser forskellige point. Indtast de rigtige startpoint i Min profil.');state.profile[activeDiscipline]=p[activeDiscipline]??'';state.profile.confirmed=false;if(p.date)state.profile.date=p.date;save();changeView('profile');return}if(!p.id)return toast('Spiller-ID mangler. Opret profilen manuelt under Modstandere.');let o=state.opponents.find(o=>o.id===p.id);if(!o){o={id:p.id,name:p.name,club:p.club,images:[]};state.opponents.push(o)}for(const d of Object.keys(labels))if(p[d]!=null&&!p.conflicts.includes(d))o[d]=p[d];o.date=p.date;for(const id of p.images)if(!o.images.some(im=>im.id===id))o.images.push({id,date:p.date,label:'Aflæst spillerprofil'});save();renderDraft();toast('Profil og billeder er gemt. Kontrollér pointene på hver kamp.')}});
  view='home';render();
