@@ -110,33 +110,40 @@ function syncDoublePoolToMatches(){
   m.poolSourceImage=e.sourceImage;
   if(e.round&&(!m.round||/^Kamp \d+$/.test(m.round)))m.round=e.round;
   if(!e.scores)continue;
-  if(m.manualResult){m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result}
-  else{m.scores=e.scores;m.result=e.result;m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result}
+  if(m.manualResult){
+   m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result;
+   const mismatch=!!m.scores&&scoreKey(m.scores)!==scoreKey(e.scores);
+   m.doublePoolConflict=mismatch?{manualScores:m.scores,screenshotScores:e.scores,sourceImage:e.sourceImage}:null;
+  }else{
+   m.scores=e.scores;m.result=e.result;m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result;m.doublePoolConflict=null;
+  }
  }
 }
 function renderDoublePoolOverview(){
- const section=$('#double-pool-section'),box=$('#double-pool-overview'),status=$('#double-pool-status'),label=$('#double-pool-upload-label');
+ const section=$('#double-pool-section'),box=$('#double-pool-overview'),status=$('#double-pool-status'),label=$('#double-pool-upload-label'),conflictBox=$('#double-pool-conflicts');
  if(!section||activeDiscipline!=='double')return;
  const count=Number(doublePlan().count)||0;section.hidden=count<1;if(count<1)return;
  const versions=doublePoolResults(),entries=doublePoolEntries();
  label.textContent=versions.length?'Upload opdateret puljeoversigt':'Upload puljeoversigt';
- if(!versions.length){status.textContent='Ingen puljeoversigt uploadet endnu.';box.innerHTML='';return}
+ if(!versions.length){status.textContent='Ingen puljeoversigt uploadet endnu.';box.innerHTML='';if(conflictBox)conflictBox.innerHTML='';return}
  const latest=versions.at(-1),u=state.uploads.find(u=>u.id===latest.id),played=entries.filter(e=>e.scores).length;
- status.textContent=(u?.name||'Seneste screenshot')+' · '+entries.length+' af dine kampe fundet · '+played+' med resultat.';
+ const conflicts=selectedMatches().filter(m=>m.discipline==='double'&&m.doublePoolConflict);
+ status.textContent=(u?.name||'Seneste screenshot')+' · '+entries.length+' af dine kampe fundet · '+played+' med resultat.'+(conflicts.length?' · '+conflicts.length+' UOVERENSSTEMMELSE(R)':'');
+ if(conflictBox)conflictBox.innerHTML=conflicts.map(m=>`<section class="double-pool-conflict"><h4>⚠ RESULTAT STEMMER IKKE</h4><p><strong>${esc(m.opponent||'Doublekamp')}</strong></p><p>Det manuelt indtastede resultat er forskelligt fra resultatet på den seneste puljeoversigt.</p><div class="double-pool-conflict-values"><div class="double-pool-conflict-value"><b>Manuelt indtastet</b>${esc(m.doublePoolConflict.manualScores)}</div><div class="double-pool-conflict-value"><b>Puljeoversigten viser</b>${esc(m.doublePoolConflict.screenshotScores)}</div></div><p><strong>Det manuelle resultat er IKKE blevet overskrevet.</strong> Kontrollér kampen.</p></section>`).join('');
  box.innerHTML=entries.map((e,i)=>{
-  const saved=matchSavedDoubleToPool(e),manual=!!saved?.manualResult&&!!saved?.scores,score=manual?saved.scores:e.scores;
+  const saved=matchSavedDoubleToPool(e),manual=!!saved?.manualResult&&!!saved?.scores,conflict=!!saved?.doublePoolConflict,score=manual?saved.scores:e.scores;
   const own=e.ownPlayers.map(p=>p.name).filter(Boolean).join(' / '),opp=e.opponentPlayers.map(p=>p.name).filter(Boolean).join(' / ');
-  const note=manual?'<div class="double-pool-manual">Manuelt indtastet resultat beholdes.</div>':'';
-  return `<article class="double-pool-match"><div class="double-pool-match-head"><div><strong>${esc(e.round||('Kamp '+(i+1)))}</strong><div class="double-pool-team">${esc(own||state.profile.name)}</div><div class="double-pool-vs">mod</div><div class="double-pool-team">${esc(opp||'Ukendt modstander')}</div></div><div class="double-pool-score ${score?'':'pending'}">${esc(score||'Afventer')}</div></div>${note}</article>`;
+  const note=conflict?'<div class="double-pool-manual"><strong>⚠ UOVERENSSTEMMELSE:</strong> kontrollér resultatet ovenfor.</div>':manual?'<div class="double-pool-manual">Manuelt indtastet resultat beholdes.</div>':'';
+  return `<article class="double-pool-match ${conflict?'has-conflict':''}"><div class="double-pool-match-head"><div><strong>${esc(e.round||('Kamp '+(i+1)))}</strong><div class="double-pool-team">${esc(own||state.profile.name)}</div><div class="double-pool-vs">mod</div><div class="double-pool-team">${esc(opp||'Ukendt modstander')}</div></div><div class="double-pool-score ${score?'':'pending'}">${esc(score||'Afventer')}</div></div>${note}</article>`;
  }).join('')||'<p class="muted">Jeg kunne ikke finde kampe med den valgte spiller på det seneste screenshot.</p>';
 }
 async function analyzeDoublePool(file){
  if(batchBusy)return toast('Vent til den aktuelle aflæsning er færdig.');
- const code=($('#ai-code').value||cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'').trim();
- if(!code)return toast('Forbind appen med din adgangskode først.');
+ const code=($('#double-pool-ai-code').value||$('#ai-code').value||cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'').trim();
+ if(!code){toast('Skriv adgangskoden til Groq-aflæsning først.');$('#double-pool-ai-code').focus();return}
  batchBusy=true;const status=$('#double-pool-status');status.textContent='Gemmer og aflæser puljeoversigten …';renderFlow();let stored=null;
  try{
-  stored=await storeBatchFile(file,'double-pool');if(!$('#ai-code').value)$('#ai-code').value=code;
+  stored=await storeBatchFile(file,'double-pool');if(!$('#ai-code').value)$('#ai-code').value=code;sessionStorage.setItem(TOURNAMENT_AI_CODE_KEY,code);
   const data=await requestImage(file,'double-pool',wait=>{status.textContent='AI holder en kort pause. Fortsætter automatisk om ca. '+wait+' sekunder …'});
   const key=draftKey();state.aiDrafts[key] ||= {results:[]};state.aiDrafts[key].results.push({id:stored.id,role:'double-pool',data});
   syncDoublePoolToMatches();save();render();toast('Puljeoversigten er opdateret.');
