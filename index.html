@@ -341,6 +341,22 @@ dialog::backdrop{background:rgba(1,5,10,.80);backdrop-filter:blur(7px)}
   .discipline-nav{top:7px}
   .discipline-menu-button{padding:16px 18px;font-size:19px}
 }
+
+.event-card{position:relative;display:flex!important;align-items:center;justify-content:space-between;gap:20px;text-align:left}
+.event-card-main{display:flex;flex-direction:column;align-items:flex-start;gap:10px;min-width:0}
+.event-card-main>strong{font-size:31px;line-height:1.05}
+.event-total-points{margin-left:auto;min-width:118px;text-align:right;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;line-height:1}
+.event-total-points b{font-size:42px;font-weight:950;letter-spacing:-.05em}
+.event-total-points small{margin-top:7px;font-size:14px;font-weight:850;text-transform:uppercase;letter-spacing:.08em;color:currentColor;opacity:.82}
+.event-total-points.pending-total{color:var(--muted)}
+.event-finished{border-color:#315068!important}
+@media(max-width:520px){
+ .event-card{gap:12px;padding-right:18px!important}
+ .event-card-main>strong{font-size:27px}
+ .event-total-points{min-width:92px}
+ .event-total-points b{font-size:36px}
+ .event-total-points small{font-size:11px;letter-spacing:.04em}
+}
 </style></head><body>
 <aside class="sidebar"><div class="brand"><span class="brand-mark">B</span>Badmintonpoint</div><p>Dit stævne. Dine point.</p><nav class="nav" aria-label="Hovedmenu"><button data-view="home"><span>▦</span>Stævner</button><button data-view="opponents"><span>◎</span>Modstandere</button><button data-view="profile"><span>○</span>Mine spillere</button></nav><div class="side-foot"><strong>Testversion · U15</strong><p>Individuelle turneringer.<br>Gemmes på denne enhed.<br>Login er ikke tilsluttet.</p></div></aside>
 <main class="main"><header class="topbar"><div class="account"><span class="avatar">BS</span><div><strong id="profile-name"></strong><small id="profile-meta"></small></div></div><span class="local">Lokal testversion</span></header>
@@ -944,9 +960,32 @@ function renderDisciplineFrontSummary(){
  }
  matchesBox.innerHTML=played.map(m=>{const c=calculation(m),n=simpleMatchNames(m),result=m.result==='win'?'Sejr':m.result==='loss'?'Nederlag':'Resultat gemt',score=m.scores||'Resultat',delta=c.delta!==undefined?signed(c.delta)+' point':c.reason||'Afventer';return `<div class="discipline-front-match"><div><b>${esc(n.opp)}</b><small>${esc(score)} · ${esc(result)}</small></div><span class="discipline-front-delta ${c.delta!==undefined?(c.delta>=0?'good':'bad'):'muted'}">${esc(delta)}</span></div>`}).join('');
 }
+function tournamentPointSummary(t){
+ const today=new Date();today.setHours(0,0,0,0);
+ const eventDate=new Date(String(t.date||'')+'T00:00:00');
+ const finished=Number.isFinite(eventDate.getTime())&&eventDate<today;
+ if(!finished)return {finished:false};
+ const profile=profileForTournament(t.id);
+ const played=state.matches.filter(m=>m.tournament===t.id&&['win','loss'].includes(m.result));
+ if(!played.length)return {finished:true,ready:false,sum:null};
+ let sum=0,ready=0;
+ for(const m of played){
+  if(m.status!=='normal'||!m.confirmed||!profile?.confirmed||!positive(m.points)||!positive(profile[m.discipline]))continue;
+  let ours=Number(profile[m.discipline]),theirs=Number(m.points);
+  if(m.discipline!=='single'){
+   if(!positive(m.partnerPoints)||!positive(m.opponentPartnerPoints))continue;
+   ours=(ours+Number(m.partnerPoints))/2;
+   theirs=(theirs+Number(m.opponentPartnerPoints))/2;
+  }
+  const delta=pointChange(ours,theirs,m.result);
+  if(delta===null||delta===undefined)continue;
+  sum+=delta;ready++;
+ }
+ return {finished:true,ready:ready===played.length&&ready>0,sum,readyCount:ready,playedCount:played.length};
+}
 function renderFlow(){
  state.aiDrafts ||= {};
- $('#home-list').innerHTML=state.tournaments.map(t=>{const p=playerForTournament(t);return `<button class="event-card secondary" data-event="${esc(t.id)}"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><small class="event-player">Spiller: ${esc(p?.name||'Ikke valgt')}</small><span>Åbn stævne →</span></button>`}).join('')||'<div class="empty event-empty"><h3>Ingen stævner endnu</h3><p>Tryk “+ Tilføj nyt stævne” for at oprette dit første stævne.</p></div>';
+ $('#home-list').innerHTML=state.tournaments.map(t=>{const p=playerForTournament(t),summary=tournamentPointSummary(t);const pointHtml=summary.finished?(summary.ready?`<span class="event-total-points ${summary.sum>=0?'good':'bad'}"><b>${esc(signed(summary.sum))}</b><small>point</small></span>`:`<span class="event-total-points pending-total"><b>—</b><small>afventer point</small></span>`):'';return `<button class="event-card secondary ${summary.finished?'event-finished':''}" data-event="${esc(t.id)}"><span class="event-card-main"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><small class="event-player">Spiller: ${esc(p?.name||'Ikke valgt')}</small><span>Åbn stævne →</span></span>${pointHtml}</button>`}).join('')||'<div class="empty event-empty"><h3>Ingen stævner endnu</h3><p>Tryk “+ Tilføj nyt stævne” for at oprette dit første stævne.</p></div>';
  const t=state.tournaments.find(t=>t.id===activeTournament);
  $('#event-title').textContent=t?.name||'Stævne';$('#event-date').textContent=t?.date||'';$('#delete-tournament').hidden=!t;
  $('#discipline-choices').innerHTML=Object.entries(labels).map(([d,n])=>`<button class="discipline-card secondary" data-discipline="${d}"><strong>${n}</strong><small>${selectedMatches().filter(m=>m.discipline===d).length} kampe</small><span>Upload billeder →</span></button>`).join('');
