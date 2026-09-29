@@ -1,15 +1,32 @@
 // Stævne → disciplin → op til 15 screenshots. Existing storage is preserved.
 let batchFiles=[],batchBusy=false,disciplineSection='cleanup',disciplineMenuOpen=false;
 state.aiDrafts ||= {};
+state.doublePlans ||= {};
 const draftKey=()=>activeTournament+':'+activeDiscipline;
 function eventSwitch(id){if(activeTournament)state.baselines[activeTournament]=structuredClone(state.profile);activeTournament=id;state.profile=profileForTournament(id);managedPlayerKey=playerForTournament(id)?.key||managedPlayerKey;save()}
 function openEvent(id){if(batchBusy)return toast('Vent til aflæsningen er færdig.');eventSwitch(id);view='event';activeDiscipline='all';batchFiles=[];render()}
 function openDiscipline(d){if(batchBusy)return toast('Vent til aflæsningen er færdig.');activeDiscipline=d;view='discipline';batchFiles=[];disciplineSection='cleanup';disciplineMenuOpen=false;render();window.scrollTo(0,0)}
-const doubleRoles={self:'Din egen profil',partner:'Din doublemakker',opponent1:'Modstander 1',opponent2:'Modstander 2'};
+const doubleRoles={self:'Din egen profil',partner:'Din doublemakker'};
+function doublePlan(){return state.doublePlans[activeTournament]||(state.doublePlans[activeTournament]={count:0})}
+function doubleOpponentRole(matchNo,playerNo){return 'double-match-'+matchNo+'-opponent-'+playerNo}
+function parseDoubleOpponentRole(role){const m=String(role||'').match(/^double-match-(\d+)-opponent-([12])$/);return m?{match:Number(m[1]),player:Number(m[2])}:null}
+function doubleRequiredRoles(){const count=Number(doublePlan().count)||0,roles=['self','partner'];for(let i=1;i<=count;i++)roles.push(doubleOpponentRole(i,1),doubleOpponentRole(i,2));return roles}
 function doubleFile(role){return batchFiles.find(f=>f.role===role)}
 function storedDoubleUpload(role){return scopedUploads().find(u=>u.role===role)}
 function doubleRoleAvailable(role){return !!doubleFile(role)||!!storedDoubleUpload(role)}
-function doubleReady(){return ['self','partner','opponent1','opponent2'].every(doubleRoleAvailable)&&(batchFiles.some(f=>f.role==='result')||scopedUploads().some(u=>u.role==='result'))}
+function doubleBaseReady(){return doubleRoleAvailable('self')&&doubleRoleAvailable('partner')}
+function doubleReady(){const count=Number(doublePlan().count)||0;return count>=1&&doubleRequiredRoles().every(doubleRoleAvailable)}
+function doubleAiRole(role){return parseDoubleOpponentRole(role)?'opponent1':role}
+function doubleRoleLabel(role){const parsed=parseDoubleOpponentRole(role);return parsed?'Kamp '+parsed.match+' · modstander '+parsed.player:(doubleRoles[role]||role)}
+function doubleDraftResult(role){return state.aiDrafts[draftKey()]?.results?.find(r=>r.role===role)||null}
+function doubleDraftPlayer(role){return doubleDraftResult(role)?.data?.players?.[0]||null}
+function doubleSlotSummary(role){
+ const p=doubleDraftPlayer(role),f=doubleFile(role),u=storedDoubleUpload(role);
+ if(p)return (p.name||'Spiller')+(positive(p.double)?' · '+fmt(p.double)+' Double-point':' · point mangler');
+ if(f)return f.file.name+' · klar til aflæsning';
+ if(u)return u.name+' · uploadet';
+ return 'Intet billede valgt.';
+}
 async function storeBatchFile(file,role){
  if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size>12*1024*1024)throw Error('Brug JPG, PNG eller WebP på højst 12 MB pr. billede.');
  const id='batch-'+crypto.randomUUID();
@@ -17,25 +34,88 @@ async function storeBatchFile(file,role){
  state.uploads.push({id,name:file.name,date:new Date().toISOString().slice(0,10),tournament:activeTournament,discipline:activeDiscipline,role});
  return {id,file,role};
 }
+async function replaceDoubleRoleUpload(role,file){
+ const old=storedDoubleUpload(role);
+ if(old){
+  await imageDelete(old.id);
+  state.uploads=state.uploads.filter(u=>u.id!==old.id);
+  const draft=state.aiDrafts[draftKey()];if(draft)draft.results=draft.results.filter(r=>r.id!==old.id);
+ }
+ batchFiles=batchFiles.filter(f=>f.role!==role);
+ batchFiles.push(await storeBatchFile(file,role));
+}
 async function setDoubleSlot(role,files){
  try{
-  if(role==='result'){
-   if(files.length>11)return toast('Vælg højst 11 billeder af kamp og resultat.');
-   batchFiles=batchFiles.filter(f=>f.role!=='result');
-   for(const file of files)batchFiles.push(await storeBatchFile(file,'result'));
-  }else{
-   if(!files[0])return;
-   batchFiles=batchFiles.filter(f=>f.role!==role);
-   batchFiles.push(await storeBatchFile(files[0],role));
-  }
-  if(batchFiles.length>15){batchFiles=batchFiles.slice(0,15);return toast('Der kan højst bruges 15 billeder i alt.')}
+  if(!files[0])return;
+  await replaceDoubleRoleUpload(role,files[0]);
   save();renderFlow();
-  $('#batch-status').textContent=doubleReady()?'Alle nødvendige Double-billeder er valgt. Tryk “Start samlet aflæsning med Groq”.':'Billederne er gemt. Vælg de resterende Double-billeder.';
+  $('#batch-status').textContent=doubleBaseReady()?(doublePlan().count?'Upload profilerne til de planlagte modstanderpar.':'Din profil og makkerens profil er klar. Vælg nu hvor mange kampe du vil planlægge.'):'Upload først både din egen profil og din doublemakkers profil.';
  }catch(e){toast(e.message||'Et billede kunne ikke gemmes.')}
+}
+async function setDoublePlanCount(count){
+ count=Math.max(1,Math.min(5,Number(count)||1));
+ const plan=doublePlan(),old=Number(plan.count)||0;
+ if(count<old){
+  const removeRoles=[];for(let i=count+1;i<=old;i++)removeRoles.push(doubleOpponentRole(i,1),doubleOpponentRole(i,2));
+  const existing=scopedUploads().filter(u=>removeRoles.includes(u.role));
+  if(existing.length&&!confirm('Du har allerede uploadet profiler til de kampe, du fjerner. Skal de billeder også slettes?'))return;
+  const ids=new Set(existing.map(u=>u.id));
+  for(const id of ids)await imageDelete(id);
+  state.uploads=state.uploads.filter(u=>!ids.has(u.id));
+  batchFiles=batchFiles.filter(f=>!removeRoles.includes(f.role));
+  const draft=state.aiDrafts[draftKey()];if(draft)draft.results=draft.results.filter(r=>!ids.has(r.id));
+  state.matches=state.matches.filter(m=>!(m.tournament===activeTournament&&m.discipline==='double'&&Number(m.plannedDoubleMatch)>count));
+ }
+ plan.count=count;save();render();
+}
+function ensureDoubleOpponent(p,imageId){
+ if(!p)return null;
+ let o=state.opponents.find(o=>samePlayerLoose(o,p));
+ if(!o){o={id:p.id||('double-local-'+crypto.randomUUID()),name:p.name||'Ukendt modstander',club:p.club||'',images:[],aiCreated:true};state.opponents.push(o)}
+ if(p.name)o.name=p.name;if(p.club)o.club=p.club;if(normalizedPlayerId(p.id))o.id=formattedPlayerId(p.id);
+ if(p.double!=null)o.double=p.double;o.date=p.date||tournamentDate();o.images ||= [];
+ if(imageId&&!o.images.some(im=>im.id===imageId))o.images.push({id:imageId,date:o.date,label:'Double · modstanderprofil'});
+ return o;
+}
+function syncDoublePlanningFromDraft(){
+ if(activeDiscipline!=='double')return;
+ const own=doubleDraftPlayer('self'),partner=doubleDraftPlayer('partner'),count=Number(doublePlan().count)||0;
+ if(own){
+  if(own.name)state.profile.name=own.name;if(normalizedPlayerId(own.id))state.profile.id=formattedPlayerId(own.id);if(own.club)state.profile.club=own.club;
+  if(own.double!=null)state.profile.double=own.double;state.profile.date=own.date||tournamentDate();state.profile.confirmed=positive(state.profile.double);
+ }
+ if(!partner||!count)return;
+ for(let i=1;i<=count;i++){
+  const r1=doubleDraftResult(doubleOpponentRole(i,1)),r2=doubleDraftResult(doubleOpponentRole(i,2));
+  const p1=r1?.data?.players?.[0],p2=r2?.data?.players?.[0];if(!p1||!p2)continue;
+  const o1=ensureDoubleOpponent(p1,r1.id),o2=ensureDoubleOpponent(p2,r2.id);
+  const ownPlayers=[
+   {id:state.profile.id||'',name:state.profile.name||'',club:state.profile.club||'',points:state.profile.double||''},
+   {id:partner.id||'',name:partner.name||'Doublemakker',club:partner.club||'',points:partner.double||''}
+  ];
+  const opponentPlayers=[
+   {id:o1?.id||p1.id||'',name:o1?.name||p1.name||'',club:o1?.club||p1.club||'',points:o1?.double??p1.double??''},
+   {id:o2?.id||p2.id||'',name:o2?.name||p2.name||'',club:o2?.club||p2.club||'',points:o2?.double??p2.double??''}
+  ];
+  let m=state.matches.find(m=>m.tournament===activeTournament&&m.discipline==='double'&&Number(m.plannedDoubleMatch)===i);
+  const base={tournament:activeTournament,discipline:'double',plannedDoubleMatch:i,opponent:opponentPlayers.map(p=>p.name).join(' / '),club:opponentPlayers.map(p=>p.club).filter(Boolean).join(' / '),opponentId:o1?.id||'',opponentIds:[o1?.id,o2?.id].filter(Boolean),scores:'',result:'pending',round:'Kamp '+i,points:opponentPlayers[0].points||'',partnerPoints:partner.double||'',opponentPartnerPoints:opponentPlayers[1].points||'',status:'normal',confirmed:true,notes:'',partnerName:partner.name||'',ownPlayers,opponentPlayers};
+  if(!m){m={id:'double-plan-'+activeTournament+'-'+i,...base};state.matches.push(m)}
+  else{const keep={scores:m.scores,result:m.result,notes:m.notes,status:m.status,confirmed:m.confirmed};Object.assign(m,base,keep)}
+ }
+}
+async function prepareDoubleBatchFromStored(){
+ const draft=state.aiDrafts[draftKey()]||{results:[]};state.aiDrafts[draftKey()] ||= draft;
+ for(const role of doubleRequiredRoles()){
+  if(draft.results.some(r=>r.role===role))continue;
+  if(batchFiles.some(f=>f.role===role))continue;
+  const u=storedDoubleUpload(role);if(!u)continue;
+  const file=await imageGet(u.id);if(!file)throw Error('Billedet '+u.name+' findes ikke længere.');
+  batchFiles.push({id:u.id,file,role});
+ }
 }
 function scopedUploads(){return state.uploads.filter(u=>u.tournament===activeTournament&&u.discipline===activeDiscipline)}
 async function imageDelete(id){try{const d=await db();await new Promise((resolve,reject)=>{const t=d.transaction('images','readwrite');t.objectStore('images').delete(id);t.oncomplete=resolve;t.onerror=()=>reject(t.error)});d.close()}catch{}try{await cloudImageDelete(id)}catch{}}
-function roleLabel(role){return doubleRoles[role]||({result:'Kamp/resultat',general:'Billede','single-self':'Spillerens profil','single-opponent':'Modstanderprofil','single-pool':'Pulje / program / resultater'}[role]||'Billede')}
+function roleLabel(role){return parseDoubleOpponentRole(role)?doubleRoleLabel(role):doubleRoles[role]||({result:'Kamp/resultat',general:'Billede','single-self':'Spillerens profil','single-opponent':'Modstanderprofil','single-pool':'Pulje / program / resultater'}[role]||'Billede')}
 function clearOwnDiscipline(){state.profile[activeDiscipline]='';const countKey=activeDiscipline+'Count';if(countKey in state.profile)state.profile[countKey]='';state.profile.confirmed=false}
 function clearOpponentDisciplineByEvidence(ids){
  const idSet=new Set(ids);
@@ -102,6 +182,7 @@ async function resetActiveDiscipline(){
  state.matches=state.matches.filter(m=>!(m.tournament===activeTournament&&m.discipline===activeDiscipline));
  clearOpponentDisciplineByEvidence(ids);
  clearOwnDiscipline();
+ if(activeDiscipline==='double')delete state.doublePlans[activeTournament];
  batchFiles=[];
  save();render();
  $('#batch-status').textContent='Alt i denne disciplin er slettet. Du kan nu starte forfra med nye billeder.';
@@ -121,7 +202,7 @@ async function deleteActiveTournament(){
  state.uploads=state.uploads.filter(u=>u.tournament!==tournamentId);
  state.matches=state.matches.filter(m=>m.tournament!==tournamentId);
  for(const key of Object.keys(state.aiDrafts||{}))if(key===tournamentId||key.startsWith(tournamentId+':'))delete state.aiDrafts[key];
- delete state.baselines[tournamentId];
+ delete state.baselines[tournamentId];delete state.doublePlans[tournamentId];
  for(const o of state.opponents||[]){
   if(o.images?.length)o.images=o.images.filter(im=>!imageSet.has(im.id));
   if(o.aiSource?.tournament===tournamentId)delete o.aiSource;
@@ -238,15 +319,20 @@ function renderFlow(){
  $('#batch-list').innerHTML=batchFiles.map(f=>`<li>${esc(f.file.name)}</li>`).join('');
  $('#batch-count').textContent=batchFiles.length?`${batchFiles.length} nye billeder valgt`:'Ingen nye billeder valgt';
  if(isDouble){
-  for(const role of Object.keys(doubleRoles)){const f=doubleFile(role),u=storedDoubleUpload(role);$('#double-'+role+'-name').textContent=f?f.file.name:u?u.name:'Intet billede valgt.'}
-  const results=batchFiles.filter(f=>f.role==='result'),storedResults=scopedUploads().filter(u=>u.role==='result');$('#double-result-name').textContent=results.length?results.map(f=>f.file.name).join(', '):storedResults.length?storedResults.map(u=>u.name).join(', '):'Ingen kampbilleder valgt.';
-  $('#double-batch-count').textContent=`${batchFiles.length} nye billeder valgt · ${doubleReady()?'de nødvendige profiler/resultat findes':'mangler et eller flere nødvendige billeder'}`;
+  $('#double-self-name').textContent=doubleSlotSummary('self');$('#double-partner-name').textContent=doubleSlotSummary('partner');
+  const baseReady=doubleBaseReady(),plan=doublePlan(),count=Number(plan.count)||0;
+  $('#double-plan-step').hidden=!baseReady;
+  document.querySelectorAll('[data-double-plan]').forEach(b=>b.classList.toggle('active',Number(b.dataset.doublePlan)===count));
+  $('#double-plan-selected').textContent=count?('Du planlægger '+count+' '+(count===1?'kamp':'kampe')+'. Upload '+(count*2)+' modstanderprofiler.'):'Vælg 1, 2, 3, 4 eller 5 kampe.';
+  $('#double-match-slots').innerHTML=count?Array.from({length:count},(_,idx)=>{const n=idx+1,r1=doubleOpponentRole(n,1),r2=doubleOpponentRole(n,2);return `<section class="double-match-plan"><h4>Kamp ${n}</h4><div class="double-opponent-grid"><label class="upload-box"><strong>Modstander 1</strong><small>${esc(doubleSlotSummary(r1))}</small><input type="file" accept="image/jpeg,image/png,image/webp" data-double-role="${r1}"></label><label class="upload-box"><strong>Modstander 2</strong><small>${esc(doubleSlotSummary(r2))}</small><input type="file" accept="image/jpeg,image/png,image/webp" data-double-role="${r2}"></label></div></section>`}).join(''):'';
+  const readyCount=doubleRequiredRoles().filter(doubleRoleAvailable).length,total=doubleRequiredRoles().length;
+  $('#double-batch-count').textContent=baseReady?(count?`${readyCount} af ${total} nødvendige profiler uploadet.`:'Vælg antal kampe for at fortsætte.'):'Upload først de to profiler på dit eget hold.';
  }
- $('#batch-analyze').hidden=isSingle;
- $('#batch-analyze').textContent=isDouble?'Start samlet aflæsning med Groq':'Aflæs billeder med Groq';
- $('#batch-analyze').disabled=batchBusy||!batchFiles.length||(isDouble&&!doubleReady());
+ $('#batch-analyze').hidden=isSingle||(isDouble&&!doublePlan().count);
+ $('#batch-analyze').textContent=isDouble?'Aflæs profiler og opret planlagte kampe':'Aflæs billeder med Groq';
+ $('#batch-analyze').disabled=batchBusy||(isDouble?!doubleReady():!batchFiles.length);
  $('#batch-input').disabled=batchBusy;
- ['self','partner','opponent1','opponent2','result'].forEach(role=>{const el=$('#double-'+role+'-input');if(el)el.disabled=batchBusy});
+ ['self','partner'].forEach(role=>{const el=$('#double-'+role+'-input');if(el)el.disabled=batchBusy});document.querySelectorAll('[data-double-role]').forEach(el=>el.disabled=batchBusy);
  ['single-self-input','single-opponent-input','single-pool-input','single-manual-save'].forEach(id=>{const el=$('#'+id);if(el)el.disabled=batchBusy});
  if(isSingle)renderSingleWorkspace();
  $('#reset-discipline').textContent='Slet alt i '+(t?.name||'stævnet')+' · '+(labels[activeDiscipline]||'');
@@ -630,12 +716,13 @@ async function recalculateActiveDiscipline(){
    if(!file)throw Error('Billedet '+u.name+' findes ikke længere i denne browser.');
    batchFiles.push({id:u.id,file,role:u.role||'general'});
    $('#recalculate-status').textContent=`Genberegner billede ${i+1} af ${uploads.length}: ${u.name} …`;
-   const data=await requestImage(file,u.role||'general',wait=>{$('#recalculate-status').textContent=`Groq holder en kort pause pga. gratisgrænsen. Fortsætter om ca. ${wait} sekunder …`});
+   const data=await requestImage(file,activeDiscipline==='double'?doubleAiRole(u.role||'general'):(u.role||'general'),wait=>{$('#recalculate-status').textContent=`Groq holder en kort pause pga. gratisgrænsen. Fortsætter om ca. ${wait} sekunder …`});
    for(const p of data.players||[])if(!p.date)p.date=tournamentDate();
    state.aiDrafts[key].results.push({id:u.id,role:u.role||'general',data});
    save();
   }
   rebuildAiMatchesFromDraft();
+  if(activeDiscipline==='double')syncDoublePlanningFromDraft();
   save();render();
   $('#recalculate-status').textContent='Genberegningen er færdig. Spillerprofiler, modstandere og resultater er læst på ny.';
   toast('Genberegningen er færdig.');
@@ -712,14 +799,13 @@ function initFlow(){
  $('#batch-input').onchange=async e=>{const files=[...e.target.files];e.target.value='';if(files.length>15)return toast('Vælg højst 15 billeder ad gangen.');if(files.some(f=>!/^image\/(jpeg|png|webp)$/.test(f.type)||f.size>12*1024*1024))return toast('Brug JPG, PNG eller WebP på højst 12 MB pr. billede.');batchFiles=[];for(const file of files){try{batchFiles.push(await storeBatchFile(file,'general'))}catch{toast('Et billede kunne ikke gemmes.')}}save();renderFlow();$('#batch-status').textContent='Billederne er gemt. AI-aflæsning sender de valgte billeder til Groq Cloud.'};
  $('#double-self-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('self',files)};
  $('#double-partner-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('partner',files)};
- $('#double-opponent1-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('opponent1',files)};
- $('#double-opponent2-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('opponent2',files)};
- $('#double-result-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('result',files)};
+ $('#double-match-slots').onchange=e=>{const input=e.target.closest('[data-double-role]');if(!input)return;const file=input.files?.[0];input.value='';if(file)setDoubleSlot(input.dataset.doubleRole,[file])};
+ $('#double-plan-counts').onclick=e=>{const b=e.target.closest('[data-double-plan]');if(b)setDoublePlanCount(b.dataset.doublePlan)};
  $('#single-self-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeSingleEvidence(file,'single-self')};
  $('#single-opponent-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeSingleEvidence(file,'single-opponent')};
  $('#single-pool-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeSingleEvidence(file,'single-pool')};
  $('#single-manual-save').onclick=saveSingleManualResult;
- $('#batch-analyze').onclick=async()=>{if(batchBusy||!batchFiles.length)return;if(activeDiscipline==='double'&&!doubleReady())return toast('Vælg først din profil, din makkers profil, begge modstanderes profiler og mindst ét kamp/resultat-billede.');if(!$('#ai-code').value)return toast('Indtast adgangskoden til AI-aflæsning.');batchBusy=true;renderFlow();const key=draftKey();state.aiDrafts[key] ||= {results:[]};let failed=0;for(let i=0;i<batchFiles.length;i++){const f=batchFiles[i];if(state.aiDrafts[key].results.some(r=>r.id===f.id))continue;const roleText=f.role&&doubleRoles[f.role]?doubleRoles[f.role]:f.role==='result'?'Kamp/resultat':'';$('#batch-status').textContent=`Aflæser billede ${i+1} af ${batchFiles.length}${roleText?' · '+roleText:''} …`;try{const data=await requestImage(f.file,f.role||'general',wait=>{$('#batch-status').textContent=`Groqs gratis hastighedsgrænse er nået. Venter ${wait} sekunder og fortsætter automatisk med billede ${i+1} af ${batchFiles.length} …`});for(const p of data.players||[])if(!p.date)p.date=tournamentDate();state.aiDrafts[key].results.push({id:f.id,role:f.role,data});save();renderDraft()}catch(e){failed++;$('#batch-status').textContent=e.message;break}}batchBusy=false;if(!failed){rebuildAiMatchesFromDraft();save();batchFiles=[]}renderFlow();if(!failed)$('#batch-status').textContent='Den samlede aflæsning er klar. Nye uploads finder du nu under “Se dine uploadede billeder”. AI kan tage fejl.'};
+ $('#batch-analyze').onclick=async()=>{if(batchBusy)return;if(activeDiscipline==='double'){if(!doubleReady())return toast('Upload først din profil, makkerens profil og begge modstanderprofiler til hver planlagt kamp.');try{await prepareDoubleBatchFromStored()}catch(e){return toast(e.message)}}else if(!batchFiles.length)return;if(!$('#ai-code').value)return toast('Indtast adgangskoden til AI-aflæsning.');batchBusy=true;renderFlow();const key=draftKey();state.aiDrafts[key] ||= {results:[]};let failed=0;for(let i=0;i<batchFiles.length;i++){const f=batchFiles[i];if(state.aiDrafts[key].results.some(r=>r.id===f.id))continue;const roleText=activeDiscipline==='double'?doubleRoleLabel(f.role):(f.role&&doubleRoles[f.role]?doubleRoles[f.role]:f.role==='result'?'Kamp/resultat':'');$('#batch-status').textContent=`Aflæser billede ${i+1} af ${batchFiles.length}${roleText?' · '+roleText:''} …`;try{const data=await requestImage(f.file,activeDiscipline==='double'?doubleAiRole(f.role||'general'):(f.role||'general'),wait=>{$('#batch-status').textContent=`Groqs gratis hastighedsgrænse er nået. Venter ${wait} sekunder og fortsætter automatisk med billede ${i+1} af ${batchFiles.length} …`});for(const p of data.players||[])if(!p.date)p.date=tournamentDate();state.aiDrafts[key].results.push({id:f.id,role:f.role,data});save();renderDraft()}catch(e){failed++;$('#batch-status').textContent=e.message;break}}batchBusy=false;if(!failed){rebuildAiMatchesFromDraft();if(activeDiscipline==='double')syncDoublePlanningFromDraft();save();batchFiles=[]}renderFlow();if(!failed)$('#batch-status').textContent=activeDiscipline==='double'?'Profilerne er aflæst, og de planlagte doublekampe er oprettet. Du kan senere tilføje resultater.':'Den samlede aflæsning er klar. Nye uploads finder du nu under “Se dine uploadede billeder”. AI kan tage fejl.'};
  document.addEventListener('input',e=>{
   const score=e.target.closest?.('[data-note-score]');
   if(score){
