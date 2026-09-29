@@ -2,7 +2,7 @@
 let batchFiles=[],batchBusy=false,disciplineSection='cleanup',disciplineMenuOpen=false;
 state.aiDrafts ||= {};
 const draftKey=()=>activeTournament+':'+activeDiscipline;
-function eventSwitch(id){state.baselines[activeTournament]=structuredClone(state.profile);activeTournament=id;state.profile=structuredClone(state.baselines[id]||{...state.profile,confirmed:false});save()}
+function eventSwitch(id){if(activeTournament)state.baselines[activeTournament]=structuredClone(state.profile);activeTournament=id;state.profile=structuredClone(state.baselines[id]||{...state.profile,confirmed:false});save()}
 function openEvent(id){if(batchBusy)return toast('Vent til aflæsningen er færdig.');eventSwitch(id);view='event';activeDiscipline='all';batchFiles=[];render()}
 function openDiscipline(d){if(batchBusy)return toast('Vent til aflæsningen er færdig.');activeDiscipline=d;view='discipline';batchFiles=[];disciplineSection='cleanup';disciplineMenuOpen=false;render();window.scrollTo(0,0)}
 const doubleRoles={self:'Din egen profil',partner:'Din doublemakker',opponent1:'Modstander 1',opponent2:'Modstander 2'};
@@ -107,6 +107,37 @@ async function resetActiveDiscipline(){
  toast('Disciplinen er nulstillet. Du kan starte forfra.');
 }
 
+async function deleteActiveTournament(){
+ const t=state.tournaments.find(t=>t.id===activeTournament);
+ if(!t)return;
+ const tournamentId=t.id;
+ const tournamentMatches=state.matches.filter(m=>m.tournament===tournamentId);
+ const tournamentUploads=state.uploads.filter(u=>u.tournament===tournamentId);
+ const message='Slet hele stævnet “'+t.name+'”?\n\nDet sletter '+tournamentMatches.length+' kamp(e), '+tournamentUploads.length+' uploadede billede(r), AI-aflæsninger og alle data, der hører til stævnet.\n\nHandlingen kan ikke fortrydes.';
+ if(!confirm(message))return;
+ const imageIds=tournamentUploads.map(u=>u.id),imageSet=new Set(imageIds);
+ for(const id of imageIds)await imageDelete(id);
+ state.uploads=state.uploads.filter(u=>u.tournament!==tournamentId);
+ state.matches=state.matches.filter(m=>m.tournament!==tournamentId);
+ for(const key of Object.keys(state.aiDrafts||{}))if(key===tournamentId||key.startsWith(tournamentId+':'))delete state.aiDrafts[key];
+ delete state.baselines[tournamentId];
+ for(const o of state.opponents||[]){
+  if(o.images?.length)o.images=o.images.filter(im=>!imageSet.has(im.id));
+  if(o.aiSource?.tournament===tournamentId)delete o.aiSource;
+ }
+ const seeded=new Set(OPPONENT_SEED.map(o=>o.id));
+ state.opponents=(state.opponents||[]).filter(o=>seeded.has(o.id)||!o.aiCreated||(o.images?.length||0)>0||state.matches.some(m=>m.opponentId===o.id||m.opponentIds?.includes(o.id)));
+ state.tournaments=state.tournaments.filter(x=>x.id!==tournamentId);
+ batchFiles=[];
+ const next=state.tournaments[0]||null;
+ activeTournament=next?.id||'';
+ if(next)state.profile=structuredClone(state.baselines[activeTournament]||{...state.profile,confirmed:false});
+ state.selectedTournament=activeTournament;
+ save();
+ changeView('home');
+ toast('Stævnet “'+t.name+'” er slettet.');
+}
+
 const oldRender=render;
 render=function(){oldRender();renderFlow()};
 const oldOpenMatch=openMatch;
@@ -184,9 +215,9 @@ function renderDisciplineFrontSummary(){
 }
 function renderFlow(){
  state.aiDrafts ||= {};
- $('#home-list').innerHTML=state.tournaments.map(t=>`<button class="event-card secondary" data-event="${esc(t.id)}"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><span>Åbn stævne →</span></button>`).join('');
+ $('#home-list').innerHTML=state.tournaments.map(t=>`<button class="event-card secondary" data-event="${esc(t.id)}"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><span>Åbn stævne →</span></button>`).join('')||'<div class="empty event-empty"><h3>Ingen stævner endnu</h3><p>Tryk “+ Tilføj nyt stævne” for at oprette dit første stævne.</p></div>';
  const t=state.tournaments.find(t=>t.id===activeTournament);
- $('#event-title').textContent=t?.name||'Stævne';$('#event-date').textContent=t?.date||'';
+ $('#event-title').textContent=t?.name||'Stævne';$('#event-date').textContent=t?.date||'';$('#delete-tournament').hidden=!t;
  $('#discipline-choices').innerHTML=Object.entries(labels).map(([d,n])=>`<button class="discipline-card secondary" data-discipline="${d}"><strong>${n}</strong><small>${selectedMatches().filter(m=>m.discipline===d).length} kampe</small><span>Upload billeder →</span></button>`).join('');
  $('#discipline-title').textContent=(t?.name||'Stævne')+' · '+(labels[activeDiscipline]||'');
  $('#discipline-help').textContent=activeDiscipline==='single'?'Upload egen spillerprofil, modstanderprofiler og kampprogram eller resultater.':activeDiscipline==='double'?'Upload de fire spillerprofiler fra i dag og derefter billeder af kampen/resultatet. Til sidst starter du én samlet aflæsning.':'Upload egen profil, din makkers profil, begge modstanderes profiler og kampprogram eller resultater.';
@@ -335,7 +366,7 @@ function initFlow(){
  $('#discipline-menu-button').onclick=e=>{e.stopPropagation();disciplineMenuOpen=!disciplineMenuOpen;renderDisciplineMenu()};
  $('#discipline-menu').onclick=e=>{const manual=e.target.closest('[data-discipline-action="manual"]');if(manual){disciplineMenuOpen=false;renderDisciplineMenu();openMatch();return}const b=e.target.closest('[data-discipline-section]');if(!b)return;setDisciplineSection(b.dataset.disciplineSection)};
 
- $('#event-back').onclick=()=>changeView('home');$('#discipline-back').onclick=()=>openEvent(activeTournament);$('#reset-discipline').onclick=resetActiveDiscipline;
+ $('#event-back').onclick=()=>changeView('home');$('#delete-tournament').onclick=deleteActiveTournament;$('#discipline-back').onclick=()=>openEvent(activeTournament);$('#reset-discipline').onclick=resetActiveDiscipline;
  $('#open-discipline-uploads').onclick=()=>changeView('discipline-uploads');$('#uploads-back').onclick=()=>changeView('discipline');$('#recalculate-discipline').onclick=recalculateActiveDiscipline;
  $('#open-discipline-players').onclick=()=>changeView('discipline-players');$('#players-back').onclick=()=>changeView('discipline');
  $('#ai-player-form').onsubmit=e=>{e.preventDefault();applyAiPlayerEdit()};
