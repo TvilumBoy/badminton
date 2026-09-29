@@ -334,8 +334,7 @@ function initFlow(){
  $('#home-add').onclick=()=>$('#tournament-dialog').showModal();
  $('#discipline-menu-button').onclick=e=>{e.stopPropagation();disciplineMenuOpen=!disciplineMenuOpen;renderDisciplineMenu()};
  $('#discipline-menu').onclick=e=>{const manual=e.target.closest('[data-discipline-action="manual"]');if(manual){disciplineMenuOpen=false;renderDisciplineMenu();openMatch();return}const b=e.target.closest('[data-discipline-section]');if(!b)return;setDisciplineSection(b.dataset.disciplineSection)};
- $('#cloud-connect').onclick=()=>cloudConnect($('#cloud-code').value,true);
- $('#cloud-disconnect').onclick=cloudDisconnect;
+
  $('#event-back').onclick=()=>changeView('home');$('#discipline-back').onclick=()=>openEvent(activeTournament);$('#reset-discipline').onclick=resetActiveDiscipline;
  $('#open-discipline-uploads').onclick=()=>changeView('discipline-uploads');$('#uploads-back').onclick=()=>changeView('discipline');$('#recalculate-discipline').onclick=recalculateActiveDiscipline;
  $('#open-discipline-players').onclick=()=>changeView('discipline-players');$('#players-back').onclick=()=>changeView('discipline');
