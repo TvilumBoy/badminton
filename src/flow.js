@@ -68,6 +68,15 @@ async function setDoublePlanCount(count){
  }
  plan.count=count;save();render();
 }
+function addMoreDoubleMatches(amount){
+ amount=Math.max(1,Math.min(5,Number(amount)||1));
+ const plan=doublePlan(),old=Number(plan.count)||0;
+ if(!old)return setDoublePlanCount(amount);
+ plan.count=old+amount;
+ save();render();
+ requestAnimationFrame(()=>{const target=document.querySelector('[data-double-role="'+doubleOpponentRole(old+1,1)+'"]')?.closest('.double-match-plan');if(target)target.scrollIntoView({behavior:'smooth',block:'start'})});
+ toast(amount===1?'1 ny kamp er tilføjet.':amount+' nye kampe er tilføjet.');
+}
 function ensureDoubleOpponent(p,imageId){
  if(!p)return null;
  let o=state.opponents.find(o=>samePlayerLoose(o,p));
@@ -309,7 +318,7 @@ function renderFlow(){
  const isDouble=activeDiscipline==='double',isSingle=activeDiscipline==='single';
  if(isSingle)syncSingleSavedMatchData();
  const uploads=scopedUploads();
- const uploadPanel=$('#ai-upload-panel'),uploadTarget=isSingle?$('#upload-panel-main'):((uploads.length&&!(view==='discipline'&&batchFiles.length))?$('#upload-panel-more'):$('#upload-panel-main'));
+ const uploadPanel=$('#ai-upload-panel'),uploadTarget=(isSingle||isDouble)?$('#upload-panel-main'):((uploads.length&&!(view==='discipline'&&batchFiles.length))?$('#upload-panel-more'):$('#upload-panel-main'));
  if(uploadPanel&&uploadTarget&&uploadPanel.parentElement!==uploadTarget)uploadTarget.appendChild(uploadPanel);
  $('#discipline-cleanup').hidden=!uploads.length;
  $('#single-batch-upload').hidden=!isSingle;
@@ -322,8 +331,9 @@ function renderFlow(){
   $('#double-self-name').textContent=doubleSlotSummary('self');$('#double-partner-name').textContent=doubleSlotSummary('partner');
   const baseReady=doubleBaseReady(),plan=doublePlan(),count=Number(plan.count)||0;
   $('#double-plan-step').hidden=!baseReady;
+  $('#double-plan-counts').hidden=!!count;
   document.querySelectorAll('[data-double-plan]').forEach(b=>b.classList.toggle('active',Number(b.dataset.doublePlan)===count));
-  $('#double-plan-selected').textContent=count?('Du planlægger '+count+' '+(count===1?'kamp':'kampe')+'. Upload '+(count*2)+' modstanderprofiler.'):'Vælg 1, 2, 3, 4 eller 5 kampe.';
+  $('#double-plan-selected').textContent=count?('Du har '+count+' planlagt '+(count===1?'kamp':'kampe')+'. Nye kampe tilføjes under “Spillerprofiler og kampe”.'):'Vælg 1, 2, 3, 4 eller 5 kampe.';
   $('#double-match-slots').innerHTML=count?Array.from({length:count},(_,idx)=>{const n=idx+1,r1=doubleOpponentRole(n,1),r2=doubleOpponentRole(n,2);return `<section class="double-match-plan"><h4>Kamp ${n}</h4><div class="double-opponent-grid"><label class="upload-box"><strong>Modstander 1</strong><small>${esc(doubleSlotSummary(r1))}</small><input type="file" accept="image/jpeg,image/png,image/webp" data-double-role="${r1}"></label><label class="upload-box"><strong>Modstander 2</strong><small>${esc(doubleSlotSummary(r2))}</small><input type="file" accept="image/jpeg,image/png,image/webp" data-double-role="${r2}"></label></div></section>`}).join(''):'';
   const readyCount=doubleRequiredRoles().filter(doubleRoleAvailable).length,total=doubleRequiredRoles().length;
   $('#double-batch-count').textContent=baseReady?(count?`${readyCount} af ${total} nødvendige profiler uploadet.`:'Vælg antal kampe for at fortsætte.'):'Upload først de to profiler på dit eget hold.';
@@ -335,6 +345,12 @@ function renderFlow(){
  ['self','partner'].forEach(role=>{const el=$('#double-'+role+'-input');if(el)el.disabled=batchBusy});document.querySelectorAll('[data-double-role]').forEach(el=>el.disabled=batchBusy);
  ['single-self-input','single-opponent-input','single-pool-input','single-manual-save'].forEach(id=>{const el=$('#'+id);if(el)el.disabled=batchBusy});
  if(isSingle)renderSingleWorkspace();
+ const addMore=$('#double-add-more');
+ if(addMore){
+  const count=isDouble?(Number(doublePlan().count)||0):0;
+  addMore.hidden=!isDouble||!doubleBaseReady()||count<1;
+  if(isDouble&&count>0)$('#double-add-more-status').textContent='Du har allerede '+count+' planlagt '+(count===1?'kamp':'kampe')+'. Du kan tilføje flere uden at ændre de eksisterende.';
+ }
  $('#reset-discipline').textContent='Slet alt i '+(t?.name||'stævnet')+' · '+(labels[activeDiscipline]||'');
  $('#uploads-title').textContent=(t?.name||'Stævne')+' · '+(labels[activeDiscipline]||'')+' · Uploadede billeder';
  $('#players-title').textContent=(t?.name||'Stævne')+' · Spillerprofiler til dette stævne';
@@ -833,7 +849,7 @@ function initFlow(){
   note.classList.remove('expanded');note.style.height='';
  });
  document.addEventListener('click',e=>{const conflict=e.target.closest?.('[data-single-conflict]');if(conflict){resolveSingleConflict(conflict.dataset.matchId,conflict.dataset.singleConflict);return}});
- document.addEventListener('click',e=>{if(disciplineMenuOpen&&!e.target.closest('.discipline-nav')){disciplineMenuOpen=false;renderDisciplineMenu()}const b=e.target.closest('button');if(!b)return;if(b.dataset.saveSimpleNote){saveSimpleResultAndNote(b.dataset.saveSimpleNote);return}if(b.dataset.editAiPlayer!==undefined){openAiPlayerEditor(Number(b.dataset.editAiPlayer));return}if(b.dataset.deleteUpload){if(confirm('Slet dette billede og den aflæsning, der kommer fra det?'))deleteEvidenceImage(b.dataset.deleteUpload);return}if(b.dataset.deleteAiPlayer!==undefined){if(confirm('Fjern denne aflæste spillerprofil? Billedet bevares.'))removeAiPlayerAt(Number(b.dataset.deleteAiPlayer));return}if(b.dataset.deleteAiMatch!==undefined){if(confirm('Fjern dette aflæste kampresultat? Billedet bevares.'))removeAiMatchAt(Number(b.dataset.deleteAiMatch));return}if(b.dataset.deleteSavedMatch){if(confirm('Slet denne gemte kamp?')){state.matches=state.matches.filter(m=>m.id!==b.dataset.deleteSavedMatch);save();render()}return}if(b.dataset.event)openEvent(b.dataset.event);if(b.dataset.discipline)openDiscipline(b.dataset.discipline);if(b.dataset.aiMatch!==undefined){const p=aiProposals[Number(b.dataset.aiMatch)];const existing=state.matches.filter(m=>m.tournament===activeTournament&&m.discipline===activeDiscipline&&norm(m.opponent)===norm(p.opponent)&&m.round===p.round);if(existing.length===1){const m=existing[0];openMatch(m.id,{...m,...p,id:m.id,notes:m.notes,points:p.points||m.points,partnerPoints:p.partnerPoints||m.partnerPoints,opponentPartnerPoints:p.opponentPartnerPoints||m.opponentPartnerPoints})}else openMatch(null,p)}
+ document.addEventListener('click',e=>{if(disciplineMenuOpen&&!e.target.closest('.discipline-nav')){disciplineMenuOpen=false;renderDisciplineMenu()}const b=e.target.closest('button');if(!b)return;if(b.dataset.doubleAdd){addMoreDoubleMatches(b.dataset.doubleAdd);return}if(b.dataset.saveSimpleNote){saveSimpleResultAndNote(b.dataset.saveSimpleNote);return}if(b.dataset.editAiPlayer!==undefined){openAiPlayerEditor(Number(b.dataset.editAiPlayer));return}if(b.dataset.deleteUpload){if(confirm('Slet dette billede og den aflæsning, der kommer fra det?'))deleteEvidenceImage(b.dataset.deleteUpload);return}if(b.dataset.deleteAiPlayer!==undefined){if(confirm('Fjern denne aflæste spillerprofil? Billedet bevares.'))removeAiPlayerAt(Number(b.dataset.deleteAiPlayer));return}if(b.dataset.deleteAiMatch!==undefined){if(confirm('Fjern dette aflæste kampresultat? Billedet bevares.'))removeAiMatchAt(Number(b.dataset.deleteAiMatch));return}if(b.dataset.deleteSavedMatch){if(confirm('Slet denne gemte kamp?')){state.matches=state.matches.filter(m=>m.id!==b.dataset.deleteSavedMatch);save();render()}return}if(b.dataset.event)openEvent(b.dataset.event);if(b.dataset.discipline)openDiscipline(b.dataset.discipline);if(b.dataset.aiMatch!==undefined){const p=aiProposals[Number(b.dataset.aiMatch)];const existing=state.matches.filter(m=>m.tournament===activeTournament&&m.discipline===activeDiscipline&&norm(m.opponent)===norm(p.opponent)&&m.round===p.round);if(existing.length===1){const m=existing[0];openMatch(m.id,{...m,...p,id:m.id,notes:m.notes,points:p.points||m.points,partnerPoints:p.partnerPoints||m.partnerPoints,opponentPartnerPoints:p.opponentPartnerPoints||m.opponentPartnerPoints})}else openMatch(null,p)}
  if(b.dataset.aiPlayer!==undefined){const p=combinedPlayers(state.aiDrafts[draftKey()])[Number(b.dataset.aiPlayer)];if(samePlayer(p,state.profile)){if(p.conflicts.includes(activeDiscipline))return toast('Billederne viser forskellige point. Indtast de rigtige startpoint under Mine spillere.');state.profile[activeDiscipline]=p[activeDiscipline]??'';state.profile.confirmed=false;if(p.date)state.profile.date=p.date;save();changeView('profile');return}if(!p.id)return toast('Spiller-ID mangler. Opret profilen manuelt under Modstandere.');let o=state.opponents.find(o=>o.id===p.id);if(!o){o={id:p.id,name:p.name,club:p.club,images:[],aiCreated:true};state.opponents.push(o)}for(const d of Object.keys(labels))if(p[d]!=null&&!p.conflicts.includes(d))o[d]=p[d];o.date=p.date;o.aiSource={tournament:activeTournament,discipline:activeDiscipline,images:[...p.images]};for(const id of p.images)if(!o.images.some(im=>im.id===id))o.images.push({id,date:p.date,label:'Aflæst spillerprofil'});save();renderDraft();toast('Profil og billeder er gemt. Kontrollér pointene på hver kamp.')}});
  view='home';render();
  if(cloudCode)cloudConnect(cloudCode,false);
