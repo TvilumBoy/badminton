@@ -78,6 +78,73 @@ function addMoreDoubleMatches(amount){
  requestAnimationFrame(()=>{const target=document.querySelector('[data-double-role="'+doubleOpponentRole(old+1,1)+'"]')?.closest('.double-match-plan');if(target)target.scrollIntoView({behavior:'smooth',block:'start'})});
  toast(amount===1?'1 ny kamp er tilføjet. Upload nu de 2 modstanderprofiler.':amount+' nye kampe er tilføjet. Upload nu de nye modstanderprofiler.');
 }
+
+function doublePoolResults(){return (state.aiDrafts[draftKey()]?.results||[]).filter(r=>r.role==='double-pool')}
+function latestDoublePoolResult(){return doublePoolResults().at(-1)||null}
+function poolSideHas(side,p){return !!p&&(side||[]).some(x=>samePlayerLoose(x,p))}
+function doublePoolEntries(){
+ const latest=latestDoublePoolResult();if(!latest)return [];
+ const out=[];
+ for(const m of latest.data?.matches||[]){
+  if(m.discipline!=='double'&&!(m.discipline==='unknown'&&m.sideA?.length===2&&m.sideB?.length===2))continue;
+  const aOwn=poolSideHas(m.sideA,state.profile),bOwn=poolSideHas(m.sideB,state.profile);
+  if(aOwn===bOwn)continue;
+  const own=aOwn?m.sideA:m.sideB,opp=aOwn?m.sideB:m.sideA;
+  const scores=(m.sets||[]).map(s=>aOwn?`${s.a}-${s.b}`:`${s.b}-${s.a}`).join(', ');
+  out.push({round:m.round||'Puljekamp',ownPlayers:own,opponentPlayers:opp,opponent:opp.map(p=>p.name).filter(Boolean).join(' / '),scores,result:resultFromScores(scores)||'pending',sourceImage:latest.id});
+ }
+ return out;
+}
+function sameDoublePair(a,b){
+ const aa=(a||[]).filter(x=>x?.name||x?.id),bb=(b||[]).filter(x=>x?.name||x?.id);
+ return aa.length===2&&bb.length===2&&aa.every(x=>bb.some(y=>samePlayerLoose(x,y)));
+}
+function matchSavedDoubleToPool(entry){
+ const ms=selectedMatches().filter(m=>m.discipline==='double');
+ return ms.find(m=>sameDoublePair(m.opponentPlayers,entry.opponentPlayers))||null;
+}
+function syncDoublePoolToMatches(){
+ if(activeDiscipline!=='double')return;
+ for(const e of doublePoolEntries()){
+  const m=matchSavedDoubleToPool(e);if(!m)continue;
+  m.poolSourceImage=e.sourceImage;
+  if(e.round&&(!m.round||/^Kamp \d+$/.test(m.round)))m.round=e.round;
+  if(!e.scores)continue;
+  if(m.manualResult){m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result}
+  else{m.scores=e.scores;m.result=e.result;m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result}
+ }
+}
+function renderDoublePoolOverview(){
+ const section=$('#double-pool-section'),box=$('#double-pool-overview'),status=$('#double-pool-status'),label=$('#double-pool-upload-label');
+ if(!section||activeDiscipline!=='double')return;
+ const count=Number(doublePlan().count)||0;section.hidden=count<1;if(count<1)return;
+ const versions=doublePoolResults(),entries=doublePoolEntries();
+ label.textContent=versions.length?'Upload opdateret puljeoversigt':'Upload puljeoversigt';
+ if(!versions.length){status.textContent='Ingen puljeoversigt uploadet endnu.';box.innerHTML='';return}
+ const latest=versions.at(-1),u=state.uploads.find(u=>u.id===latest.id),played=entries.filter(e=>e.scores).length;
+ status.textContent=(u?.name||'Seneste screenshot')+' · '+entries.length+' af dine kampe fundet · '+played+' med resultat.';
+ box.innerHTML=entries.map((e,i)=>{
+  const saved=matchSavedDoubleToPool(e),manual=!!saved?.manualResult&&!!saved?.scores,score=manual?saved.scores:e.scores;
+  const own=e.ownPlayers.map(p=>p.name).filter(Boolean).join(' / '),opp=e.opponentPlayers.map(p=>p.name).filter(Boolean).join(' / ');
+  const note=manual?'<div class="double-pool-manual">Manuelt indtastet resultat beholdes.</div>':'';
+  return `<article class="double-pool-match"><div class="double-pool-match-head"><div><strong>${esc(e.round||('Kamp '+(i+1)))}</strong><div class="double-pool-team">${esc(own||state.profile.name)}</div><div class="double-pool-vs">mod</div><div class="double-pool-team">${esc(opp||'Ukendt modstander')}</div></div><div class="double-pool-score ${score?'':'pending'}">${esc(score||'Afventer')}</div></div>${note}</article>`;
+ }).join('')||'<p class="muted">Jeg kunne ikke finde kampe med den valgte spiller på det seneste screenshot.</p>';
+}
+async function analyzeDoublePool(file){
+ if(batchBusy)return toast('Vent til den aktuelle aflæsning er færdig.');
+ const code=($('#ai-code').value||cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'').trim();
+ if(!code)return toast('Forbind appen med din adgangskode først.');
+ batchBusy=true;const status=$('#double-pool-status');status.textContent='Gemmer og aflæser puljeoversigten …';renderFlow();let stored=null;
+ try{
+  stored=await storeBatchFile(file,'double-pool');if(!$('#ai-code').value)$('#ai-code').value=code;
+  const data=await requestImage(file,'double-pool',wait=>{status.textContent='AI holder en kort pause. Fortsætter automatisk om ca. '+wait+' sekunder …'});
+  const key=draftKey();state.aiDrafts[key] ||= {results:[]};state.aiDrafts[key].results.push({id:stored.id,role:'double-pool',data});
+  syncDoublePoolToMatches();save();render();toast('Puljeoversigten er opdateret.');
+ }catch(e){
+  if(stored){await imageDelete(stored.id);state.uploads=state.uploads.filter(u=>u.id!==stored.id)}
+  status.textContent=e.message||'Puljeoversigten kunne ikke aflæses.';toast(status.textContent);
+ }finally{batchBusy=false;render()}
+}
 function ensureDoubleOpponent(p,imageId){
  if(!p)return null;
  let o=state.opponents.find(o=>samePlayerLoose(o,p));
@@ -125,7 +192,7 @@ async function prepareDoubleBatchFromStored(){
 }
 function scopedUploads(){return state.uploads.filter(u=>u.tournament===activeTournament&&u.discipline===activeDiscipline)}
 async function imageDelete(id){try{const d=await db();await new Promise((resolve,reject)=>{const t=d.transaction('images','readwrite');t.objectStore('images').delete(id);t.oncomplete=resolve;t.onerror=()=>reject(t.error)});d.close()}catch{}try{await cloudImageDelete(id)}catch{}}
-function roleLabel(role){return parseDoubleOpponentRole(role)?doubleRoleLabel(role):doubleRoles[role]||({result:'Kamp/resultat',general:'Billede','single-self':'Spillerens profil','single-opponent':'Modstanderprofil','single-pool':'Pulje / program / resultater'}[role]||'Billede')}
+function roleLabel(role){return parseDoubleOpponentRole(role)?doubleRoleLabel(role):doubleRoles[role]||({'double-pool':'Double · pulje/program/resultater',result:'Kamp/resultat',general:'Billede','single-self':'Spillerens profil','single-opponent':'Modstanderprofil','single-pool':'Pulje / program / resultater'}[role]||'Billede')}
 function clearOwnDiscipline(){state.profile[activeDiscipline]='';const countKey=activeDiscipline+'Count';if(countKey in state.profile)state.profile[countKey]='';state.profile.confirmed=false}
 function clearOpponentDisciplineByEvidence(ids){
  const idSet=new Set(ids);
@@ -285,6 +352,7 @@ function saveSimpleResultAndNote(id){
  const notes=document.querySelector('[data-note-text="'+CSS.escape(id)+'"]')?.value.trim()||'';
  m.scores=score;m.notes=notes;
  const inferred=resultFromScores(score);m.result=inferred||'pending';
+ if(activeDiscipline==='double'&&score)m.manualResult=true;
  save();render();disciplineSection='notes';renderDisciplineMenu();toast('Resultat og noter er gemt.');
 }
 function renderDisciplineFrontSummary(){
@@ -359,6 +427,7 @@ function renderFlow(){
   if(cleanupUploads)cleanupUploads.hidden=isDouble&&count>0;
   if(uploadMain)uploadMain.hidden=compact;
   $('#discipline-cleanup').hidden=isDouble?!(count>0):!uploads.length;
+  if(isDouble&&count>0){syncDoublePoolToMatches();renderDoublePoolOverview()}
  }
  $('#reset-discipline').textContent='Slet alt i '+(t?.name||'stævnet')+' · '+(labels[activeDiscipline]||'');
  $('#uploads-title').textContent=(t?.name||'Stævne')+' · '+(labels[activeDiscipline]||'')+' · Uploadede billeder';
@@ -414,7 +483,7 @@ function proposalMatches(draft){
  };
  const rating=p=>{const known=knownPlayer(p);if(known&&!known.player.conflicts?.includes(activeDiscipline)&&positive(known.player[activeDiscipline]))return known.player[activeDiscipline];if(samePlayerLoose(p,state.profile))return state.profile[activeDiscipline]??'';return ''};
  const detail=p=>{const known=knownPlayer(p)?.player||p;return {id:known.id||p.id||'',name:known.name||p.name||'',club:known.club||p.club||'',points:rating(p)}};
- for(const image of draft?.results||[])for(const m of image.data.matches){
+ for(const image of draft?.results||[]){if(activeDiscipline==='double'&&image.role==='double-pool')continue;for(const m of image.data.matches){
   const expectedCount=activeDiscipline==='single'?1:2;
   const inferredSelected=m.discipline==='unknown'&&m.sideA?.length===expectedCount&&m.sideB?.length===expectedCount;
   if(m.discipline!==activeDiscipline&&!inferredSelected)continue;
@@ -440,7 +509,7 @@ function proposalMatches(draft){
    partnerName:partner?.name||'',ownPlayers:ownDetails,opponentPlayers:opponentDetails
   };
   if(!out.some(x=>sameSingleOpponent(x,p)&&x.round===p.round&&x.scores===p.scores))out.push(p);
- }
+ }}
  return out;
 }
 
@@ -747,7 +816,7 @@ async function recalculateActiveDiscipline(){
    save();
   }
   rebuildAiMatchesFromDraft();
-  if(activeDiscipline==='double')syncDoublePlanningFromDraft();
+  if(activeDiscipline==='double'){syncDoublePlanningFromDraft();syncDoublePoolToMatches()}
   save();render();
   $('#recalculate-status').textContent='Genberegningen er færdig. Spillerprofiler, modstandere og resultater er læst på ny.';
   toast('Genberegningen er færdig.');
@@ -796,7 +865,7 @@ function applyTournamentInfo(info){
  else if(levels.length&&ageLevels.length===0)extra=' De synlige rækker er '+levels.join(', ')+'. Kontrollér rækken manuelt.';
  $('#t-info-status').textContent=(found.length?'Aflæst '+found.join(', ')+'.':'Jeg fandt ikke sikre stævnefelter i informationsboksen.')+extra;
 }
-async function requestImage(file,role='general',onWait=null){let data=await imageData(file);if(data.length>3500000)throw Error(file.name+': Billedet fylder for meget til AI-aflæsning. Brug et screenshot på højst ca. 2,5 MB.');for(let attempt=0;attempt<8;attempt++){const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json','x-app-code':$('#ai-code').value},body:JSON.stringify({image:data,discipline:activeDiscipline,role})});let body;try{body=await r.json()}catch{throw Error('AI-serveren er ikke tilgængelig på denne adresse. Appen skal køre på Vercel med AI aktiveret.')}if(r.status===429&&attempt<7){const wait=Math.max(5,Number(body.retryAfterSeconds||20));if(wait>90)throw Error(body.error||'Den gratis dagskvote er nået. Prøv igen senere.');if(onWait)onWait(wait);await sleep((wait+1)*1000);continue}if(!r.ok)throw Error(body.error||'Aflæsning mislykkedes.');return body}throw Error('Groq kunne ikke fortsætte efter flere automatiske forsøg.')}
+async function requestImage(file,role='general',onWait=null){let data=await imageData(file);if(data.length>3500000)throw Error(file.name+': Billedet fylder for meget til AI-aflæsning. Brug et screenshot på højst ca. 2,5 MB.');const code=($('#ai-code').value||cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'').trim();if(!code)throw Error('Mangler adgangskode til AI-aflæsning.');for(let attempt=0;attempt<8;attempt++){const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json','x-app-code':code},body:JSON.stringify({image:data,discipline:activeDiscipline,role})});let body;try{body=await r.json()}catch{throw Error('AI-serveren er ikke tilgængelig på denne adresse. Appen skal køre på Vercel med AI aktiveret.')}if(r.status===429&&attempt<7){const wait=Math.max(5,Number(body.retryAfterSeconds||20));if(wait>90)throw Error(body.error||'Den gratis dagskvote er nået. Prøv igen senere.');if(onWait)onWait(wait);await sleep((wait+1)*1000);continue}if(!r.ok)throw Error(body.error||'Aflæsning mislykkedes.');return body}throw Error('Groq kunne ikke fortsætte efter flere automatiske forsøg.')}
 function initFlow(){
  const oldChange=changeView;changeView=function(v){if(batchBusy)return toast('Vent til aflæsningen er færdig.');oldChange(v)};
  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>changeView(b.dataset.view));
@@ -826,6 +895,7 @@ function initFlow(){
  $('#double-partner-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('partner',files)};
  $('#double-match-slots').onchange=e=>{const input=e.target.closest('[data-double-role]');if(!input)return;const file=input.files?.[0];input.value='';if(file)setDoubleSlot(input.dataset.doubleRole,[file])};
  $('#double-plan-counts').onclick=e=>{const b=e.target.closest('[data-double-plan]');if(b)setDoublePlanCount(b.dataset.doublePlan)};
+ $('#double-pool-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeDoublePool(file)};
  $('#single-self-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeSingleEvidence(file,'single-self')};
  $('#single-opponent-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeSingleEvidence(file,'single-opponent')};
  $('#single-pool-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeSingleEvidence(file,'single-pool')};
