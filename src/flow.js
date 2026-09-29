@@ -124,6 +124,29 @@ function renderDisciplineMenu(){
  menu.hidden=!disciplineMenuOpen;button.setAttribute('aria-expanded',disciplineMenuOpen?'true':'false');
  ['cleanup','review','points','notes'].forEach(s=>{const pane=$('#discipline-pane-'+s);if(pane)pane.hidden=s!==disciplineSection;const b=menu.querySelector('[data-discipline-section="'+s+'"]');if(b)b.setAttribute('aria-current',s===disciplineSection?'true':'false')});
 }
+const MATCH_NOTE_TEMPLATE=`Din modstander er god til:
+
+1.
+
+2.
+
+3.
+
+Din modstander har svært ved:
+
+1.
+
+2.
+
+3.
+
+Dine fokuspunkter for denne kamp:
+
+1.
+
+2.
+
+3.`;
 function simpleMatchNames(m){
  const own=(m.ownPlayers||[]).map(p=>p.name).filter(Boolean);
  const opp=(m.opponentPlayers||[]).map(p=>p.name).filter(Boolean);
@@ -132,14 +155,14 @@ function simpleMatchNames(m){
 function renderDisciplineNotes(){
  const box=$('#discipline-notes-list');if(!box)return;
  const ms=selectedMatches().filter(m=>m.discipline===activeDiscipline);
- box.innerHTML=ms.map(m=>{const n=simpleMatchNames(m);return `<article class="simple-note-card"><div class="simple-note-names">${esc(n.own)}</div><div class="simple-note-vs">mod ${esc(n.opp)}</div><div class="simple-result-row"><label class="field"><span>Resultat</span><input data-note-score="${esc(m.id)}" value="${esc(m.scores||'')}" placeholder="Fx 15-11, 15-9" maxlength="80"></label><label class="field"><span>Noter</span><textarea data-note-text="${esc(m.id)}" maxlength="10000" placeholder="Skriv dine noter til kampen …">${esc(m.notes||'')}</textarea></label></div><button class="secondary" data-save-simple-note="${esc(m.id)}">Gem resultat og noter</button></article>`}).join('')||'<p class="muted">Ingen kampe i denne disciplin endnu.</p>';
+ box.innerHTML=ms.map(m=>{const n=simpleMatchNames(m),noteValue=m.notes||MATCH_NOTE_TEMPLATE;return `<article class="simple-note-card"><div class="simple-note-names">${esc(n.own)}</div><div class="simple-note-vs">mod ${esc(n.opp)}</div><div class="simple-result-row"><label class="field"><span>Resultat</span><input data-note-score="${esc(m.id)}" value="${esc(m.scores||'')}" placeholder="Fx 15-11, 15-9" maxlength="80" inputmode="numeric"></label><label class="field"><span>Noter</span><textarea class="match-notes-textarea" data-note-text="${esc(m.id)}" maxlength="10000">${esc(noteValue)}</textarea></label></div><button class="secondary" data-save-simple-note="${esc(m.id)}">Gem resultat og noter</button></article>`}).join('')||'<p class="muted">Ingen kampe i denne disciplin endnu.</p>';
 }
 function saveSimpleResultAndNote(id){
  const m=state.matches.find(m=>m.id===id);if(!m)return;
  const score=document.querySelector('[data-note-score="'+CSS.escape(id)+'"]')?.value.trim()||'';
  const notes=document.querySelector('[data-note-text="'+CSS.escape(id)+'"]')?.value.trim()||'';
  m.scores=score;m.notes=notes;
- const inferred=resultFromScores(score);if(inferred)m.result=inferred;
+ const inferred=resultFromScores(score);m.result=inferred||'pending';
  save();render();disciplineSection='notes';renderDisciplineMenu();toast('Resultat og noter er gemt.');
 }
 function renderDisciplineFrontSummary(){
@@ -210,7 +233,7 @@ function proposalMatches(draft){const players=combinedPlayers(draft),out=[];cons
 function playerLineHtml(p){const pts=positive(p?.points)?fmt(Number(p.points))+' point':'point mangler';return `<div class="player-line"><div><strong>${esc(p?.name||'Navn mangler')}</strong><small>${esc(p?.club||'Klub mangler')}${p?.id?' · '+esc(p.id):''}</small></div><span class="player-points">${esc(pts)}</span></div>`}
 function pairAverage(players){const nums=(players||[]).map(p=>Number(p.points)).filter(n=>Number.isFinite(n)&&n>0);if(nums.length!==(players||[]).length||!nums.length)return null;return nums.reduce((a,b)=>a+b,0)/nums.length}
 function pairAverageHtml(players){const a=pairAverage(players);return a==null?'':`<div class="pair-average">Parrets gennemsnit: ${esc(fmt(a))} point</div>`}
-function matchupHtml(p){const ownPlayers=p.ownPlayers||[],oppPlayers=p.opponentPlayers||[],own=ownPlayers.map(playerLineHtml).join(''),opp=oppPlayers.map(playerLineHtml).join('');return `<div class="versus-side"><small>Dit hold</small>${own}${pairAverageHtml(ownPlayers)}</div><div class="versus-side"><small>Modstandere</small>${opp}${pairAverageHtml(oppPlayers)}</div>`}
+function matchupHtml(p){const ownPlayers=p.ownPlayers||[],oppPlayers=p.opponentPlayers||[],own=ownPlayers.map(playerLineHtml).join(''),opp=oppPlayers.map(playerLineHtml).join('');return `<div class="versus-side"><div class="versus-heading">Dit hold</div>${own}${pairAverageHtml(ownPlayers)}</div><div class="versus-side"><div class="versus-heading">Modstandere</div>${opp}${pairAverageHtml(oppPlayers)}</div>`}
 function pointDifferenceHtml(ours,theirs){if(!Number.isFinite(Number(ours))||!Number.isFinite(Number(theirs)))return '';const diff=Number(ours)-Number(theirs),shown=(diff>0?'+':'')+fmt(diff);return `<div class="point-difference">Pointforskel: ${esc(fmt(Number(ours)))} − ${esc(fmt(Number(theirs)))} = ${esc(shown)} point</div>`}
 function matchOutcomeHtml(m,c){const resultText=m.result==='win'?'Sejr':m.result==='loss'?'Nederlag':'Afventer resultat';const points=c.delta===undefined?esc(c.reason):esc(signed(c.delta)+' point');const difference=activeDiscipline==='single'?'':pointDifferenceHtml(c.ours,c.theirs);return `<div class="match-outcome"><div class="versus-score">${esc(m.scores||'Resultat mangler')}</div><div class="match-outcome-result">${resultText}</div>${difference}<div class="match-outcome-points">${points}</div></div>`}
 function proposalPointPreview(p){if(p.status!=='normal'||!['win','loss'].includes(p.result))return '';const ours=pairAverage(p.ownPlayers||[]),theirs=pairAverage(p.opponentPlayers||[]);if(ours==null||theirs==null)return '';return `${pointDifferenceHtml(ours,theirs)}<div class="match-outcome-points">${esc(signed(pointChange(ours,theirs,p.result))+' point')}</div>`}
@@ -326,6 +349,32 @@ function initFlow(){
  $('#double-opponent2-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('opponent2',files)};
  $('#double-result-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('result',files)};
  $('#batch-analyze').onclick=async()=>{if(batchBusy||!batchFiles.length)return;if(activeDiscipline==='double'&&!doubleReady())return toast('Vælg først din profil, din makkers profil, begge modstanderes profiler og mindst ét kamp/resultat-billede.');if(!$('#ai-code').value)return toast('Indtast adgangskoden til AI-aflæsning.');batchBusy=true;renderFlow();const key=draftKey();state.aiDrafts[key] ||= {results:[]};let failed=0;for(let i=0;i<batchFiles.length;i++){const f=batchFiles[i];if(state.aiDrafts[key].results.some(r=>r.id===f.id))continue;const roleText=f.role&&doubleRoles[f.role]?doubleRoles[f.role]:f.role==='result'?'Kamp/resultat':'';$('#batch-status').textContent=`Aflæser billede ${i+1} af ${batchFiles.length}${roleText?' · '+roleText:''} …`;try{const data=await requestImage(f.file,f.role||'general',wait=>{$('#batch-status').textContent=`Groqs gratis hastighedsgrænse er nået. Venter ${wait} sekunder og fortsætter automatisk med billede ${i+1} af ${batchFiles.length} …`});for(const p of data.players||[])if(!p.date)p.date=tournamentDate();state.aiDrafts[key].results.push({id:f.id,role:f.role,data});save();renderDraft()}catch(e){failed++;$('#batch-status').textContent=e.message;break}}batchBusy=false;if(!failed){rebuildAiMatchesFromDraft();save();batchFiles=[]}renderFlow();if(!failed)$('#batch-status').textContent='Den samlede aflæsning er klar. Nye uploads finder du nu under “Se dine uploadede billeder”. AI kan tage fejl.'};
+ document.addEventListener('input',e=>{
+  const score=e.target.closest?.('[data-note-score]');
+  if(score){
+   const m=state.matches.find(m=>m.id===score.dataset.noteScore);if(!m)return;
+   m.scores=score.value.trim();
+   m.result=resultFromScores(m.scores)||'pending';
+   save();
+   renderDisciplineFrontSummary();
+   return;
+  }
+  const note=e.target.closest?.('[data-note-text]');
+  if(note){
+   const m=state.matches.find(m=>m.id===note.dataset.noteText);if(!m)return;
+   m.notes=note.value;
+   save();
+   if(note.classList.contains('expanded')){note.style.height='auto';note.style.height=Math.max(360,note.scrollHeight+6)+'px'}
+  }
+ });
+ document.addEventListener('focusin',e=>{
+  const note=e.target.closest?.('[data-note-text]');if(!note)return;
+  note.classList.add('expanded');note.style.height='auto';note.style.height=Math.max(360,note.scrollHeight+6)+'px';
+ });
+ document.addEventListener('focusout',e=>{
+  const note=e.target.closest?.('[data-note-text]');if(!note)return;
+  note.classList.remove('expanded');note.style.height='';
+ });
  document.addEventListener('click',e=>{if(disciplineMenuOpen&&!e.target.closest('.discipline-nav')){disciplineMenuOpen=false;renderDisciplineMenu()}const b=e.target.closest('button');if(!b)return;if(b.dataset.saveSimpleNote){saveSimpleResultAndNote(b.dataset.saveSimpleNote);return}if(b.dataset.editAiPlayer!==undefined){openAiPlayerEditor(Number(b.dataset.editAiPlayer));return}if(b.dataset.deleteUpload){if(confirm('Slet dette billede og den aflæsning, der kommer fra det?'))deleteEvidenceImage(b.dataset.deleteUpload);return}if(b.dataset.deleteAiPlayer!==undefined){if(confirm('Fjern denne aflæste spillerprofil? Billedet bevares.'))removeAiPlayerAt(Number(b.dataset.deleteAiPlayer));return}if(b.dataset.deleteAiMatch!==undefined){if(confirm('Fjern dette aflæste kampresultat? Billedet bevares.'))removeAiMatchAt(Number(b.dataset.deleteAiMatch));return}if(b.dataset.deleteSavedMatch){if(confirm('Slet denne gemte kamp?')){state.matches=state.matches.filter(m=>m.id!==b.dataset.deleteSavedMatch);save();render()}return}if(b.dataset.event)openEvent(b.dataset.event);if(b.dataset.discipline)openDiscipline(b.dataset.discipline);if(b.dataset.aiMatch!==undefined){const p=aiProposals[Number(b.dataset.aiMatch)];const existing=state.matches.filter(m=>m.tournament===activeTournament&&m.discipline===activeDiscipline&&norm(m.opponent)===norm(p.opponent)&&m.round===p.round);if(existing.length===1){const m=existing[0];openMatch(m.id,{...m,...p,id:m.id,notes:m.notes,points:p.points||m.points,partnerPoints:p.partnerPoints||m.partnerPoints,opponentPartnerPoints:p.opponentPartnerPoints||m.opponentPartnerPoints})}else openMatch(null,p)}
  if(b.dataset.aiPlayer!==undefined){const p=combinedPlayers(state.aiDrafts[draftKey()])[Number(b.dataset.aiPlayer)];if(samePlayer(p,state.profile)){if(p.conflicts.includes(activeDiscipline))return toast('Billederne viser forskellige point. Indtast de rigtige startpoint i Min profil.');state.profile[activeDiscipline]=p[activeDiscipline]??'';state.profile.confirmed=false;if(p.date)state.profile.date=p.date;save();changeView('profile');return}if(!p.id)return toast('Spiller-ID mangler. Opret profilen manuelt under Modstandere.');let o=state.opponents.find(o=>o.id===p.id);if(!o){o={id:p.id,name:p.name,club:p.club,images:[],aiCreated:true};state.opponents.push(o)}for(const d of Object.keys(labels))if(p[d]!=null&&!p.conflicts.includes(d))o[d]=p[d];o.date=p.date;o.aiSource={tournament:activeTournament,discipline:activeDiscipline,images:[...p.images]};for(const id of p.images)if(!o.images.some(im=>im.id===id))o.images.push({id,date:p.date,label:'Aflæst spillerprofil'});save();renderDraft();toast('Profil og billeder er gemt. Kontrollér pointene på hver kamp.')}});
  view='home';render();
