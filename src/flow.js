@@ -385,9 +385,32 @@ function renderDisciplineFrontSummary(){
  }
  matchesBox.innerHTML=played.map(m=>{const c=calculation(m),n=simpleMatchNames(m),result=m.result==='win'?'Sejr':m.result==='loss'?'Nederlag':'Resultat gemt',score=m.scores||'Resultat',delta=c.delta!==undefined?signed(c.delta)+' point':c.reason||'Afventer';return `<div class="discipline-front-match"><div><b>${esc(n.opp)}</b><small>${esc(score)} · ${esc(result)}</small></div><span class="discipline-front-delta ${c.delta!==undefined?(c.delta>=0?'good':'bad'):'muted'}">${esc(delta)}</span></div>`}).join('');
 }
+function tournamentPointSummary(t){
+ const today=new Date();today.setHours(0,0,0,0);
+ const eventDate=new Date(String(t.date||'')+'T00:00:00');
+ const finished=Number.isFinite(eventDate.getTime())&&eventDate<today;
+ if(!finished)return {finished:false};
+ const profile=profileForTournament(t.id);
+ const played=state.matches.filter(m=>m.tournament===t.id&&['win','loss'].includes(m.result));
+ if(!played.length)return {finished:true,ready:false,sum:null};
+ let sum=0,ready=0;
+ for(const m of played){
+  if(m.status!=='normal'||!m.confirmed||!profile?.confirmed||!positive(m.points)||!positive(profile[m.discipline]))continue;
+  let ours=Number(profile[m.discipline]),theirs=Number(m.points);
+  if(m.discipline!=='single'){
+   if(!positive(m.partnerPoints)||!positive(m.opponentPartnerPoints))continue;
+   ours=(ours+Number(m.partnerPoints))/2;
+   theirs=(theirs+Number(m.opponentPartnerPoints))/2;
+  }
+  const delta=pointChange(ours,theirs,m.result);
+  if(delta===null||delta===undefined)continue;
+  sum+=delta;ready++;
+ }
+ return {finished:true,ready:ready===played.length&&ready>0,sum,readyCount:ready,playedCount:played.length};
+}
 function renderFlow(){
  state.aiDrafts ||= {};
- $('#home-list').innerHTML=state.tournaments.map(t=>{const p=playerForTournament(t);return `<button class="event-card secondary" data-event="${esc(t.id)}"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><small class="event-player">Spiller: ${esc(p?.name||'Ikke valgt')}</small><span>Åbn stævne →</span></button>`}).join('')||'<div class="empty event-empty"><h3>Ingen stævner endnu</h3><p>Tryk “+ Tilføj nyt stævne” for at oprette dit første stævne.</p></div>';
+ $('#home-list').innerHTML=state.tournaments.map(t=>{const p=playerForTournament(t),summary=tournamentPointSummary(t);const pointHtml=summary.finished?(summary.ready?`<span class="event-total-points ${summary.sum>=0?'good':'bad'}"><b>${esc(signed(summary.sum))}</b><small>point</small></span>`:`<span class="event-total-points pending-total"><b>—</b><small>afventer point</small></span>`):'';return `<button class="event-card secondary ${summary.finished?'event-finished':''}" data-event="${esc(t.id)}"><span class="event-card-main"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><small class="event-player">Spiller: ${esc(p?.name||'Ikke valgt')}</small><span>Åbn stævne →</span></span>${pointHtml}</button>`}).join('')||'<div class="empty event-empty"><h3>Ingen stævner endnu</h3><p>Tryk “+ Tilføj nyt stævne” for at oprette dit første stævne.</p></div>';
  const t=state.tournaments.find(t=>t.id===activeTournament);
  $('#event-title').textContent=t?.name||'Stævne';$('#event-date').textContent=t?.date||'';$('#delete-tournament').hidden=!t;
  $('#discipline-choices').innerHTML=Object.entries(labels).map(([d,n])=>`<button class="discipline-card secondary" data-discipline="${d}"><strong>${n}</strong><small>${selectedMatches().filter(m=>m.discipline===d).length} kampe</small><span>Upload billeder →</span></button>`).join('');
