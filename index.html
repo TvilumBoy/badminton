@@ -431,10 +431,27 @@ function renderFlow(){
  renderDisciplineMenu();
 }
 const norm=s=>String(s||'').normalize('NFC').trim().toLocaleLowerCase('da-DK');
-function samePlayer(a,b){return a.id&&b.id?a.id===b.id:!!a.name&&norm(a.name)===norm(b.name)}
+function normalizedPlayerId(id){const digits=String(id||'').replace(/\D/g,'');return digits.length===8?digits:''}
+function formattedPlayerId(id){const n=normalizedPlayerId(id);return n?n.slice(0,6)+'-'+n.slice(6):String(id||'').trim()}
+function samePlayer(a,b){
+ if(!(a&&b))return false;
+ const aid=normalizedPlayerId(a.id),bid=normalizedPlayerId(b.id);
+ if(aid&&bid)return aid===bid;
+ return !!a.name&&!!b.name&&norm(a.name)===norm(b.name);
+}
 function nameKey(s){return norm(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim()}
 function levenshtein(a,b){a=nameKey(a);b=nameKey(b);const m=a.length,n=b.length;if(!m)return n;if(!n)return m;const row=Array.from({length:n+1},(_,i)=>i);for(let i=1;i<=m;i++){let prev=row[0];row[0]=i;for(let j=1;j<=n;j++){const tmp=row[j],cost=a[i-1]===b[j-1]?0:1;row[j]=Math.min(row[j]+1,row[j-1]+1,prev+cost);prev=tmp}}return row[n]}
-function samePlayerLoose(a,b){if(!(a&&b))return false;if(a.id&&b.id&&a.id===b.id)return true;if(a.name&&b.name&&norm(a.name)===norm(b.name))return true;if(!a.name||!b.name)return false;const aa=nameKey(a.name).split(' ').filter(Boolean),bb=nameKey(b.name).split(' ').filter(Boolean);if(!aa.length||!bb.length)return false;const sameClub=!a.club||!b.club||nameKey(a.club)===nameKey(b.club),firstSame=aa[0]===bb[0],fullDistance=levenshtein(a.name,b.name),lastDistance=levenshtein(aa[aa.length-1],bb[bb.length-1]),sameMiddle=aa.length>2&&bb.length>2&&aa.slice(1,-1).join(' ')===bb.slice(1,-1).join(' ');return sameClub&&firstSame&&(fullDistance<=2||(sameMiddle&&lastDistance<=2))}
+function samePlayerLoose(a,b){
+ if(!(a&&b))return false;
+ const aid=normalizedPlayerId(a.id),bid=normalizedPlayerId(b.id);
+ if(aid&&bid)return aid===bid;
+ if(a.name&&b.name&&norm(a.name)===norm(b.name))return true;
+ if(!a.name||!b.name)return false;
+ const aa=nameKey(a.name).split(' ').filter(Boolean),bb=nameKey(b.name).split(' ').filter(Boolean);
+ if(!aa.length||!bb.length)return false;
+ const sameClub=!a.club||!b.club||nameKey(a.club)===nameKey(b.club),firstSame=aa[0]===bb[0],fullDistance=levenshtein(a.name,b.name),lastDistance=levenshtein(aa[aa.length-1],bb[bb.length-1]),sameMiddle=aa.length>2&&bb.length>2&&aa.slice(1,-1).join(' ')===bb.slice(1,-1).join(' ');
+ return sameClub&&firstSame&&(fullDistance<=2||(sameMiddle&&lastDistance<=2));
+}
 function tournamentDate(){return state.tournaments.find(t=>t.id===activeTournament)?.date||''}
 function combinedPlayers(draft){const map=[];const eventDate=tournamentDate();for(const image of draft?.results||[])for(const raw of image.data.players){const p={...raw,date:raw.date||eventDate};let q=map.find(x=>samePlayer(x,p));if(!q){q={...p,images:[],conflicts:[]};map.push(q)}else{if(!q.id&&p.id)q.id=p.id;if(!q.name&&p.name)q.name=p.name;if(!q.club&&p.club)q.club=p.club;if(!q.date&&p.date)q.date=p.date}for(const d of ['single','double','mix'])if(p[d]!=null){if(q[d]!=null&&q[d]!==p[d])q.conflicts.push(d);else q[d]=p[d]}q.images.push(image.id)}return map}
 function proposalMatches(draft){
@@ -445,7 +462,9 @@ function proposalMatches(draft){
   if(!p)return null;
   if(activeDiscipline==='single'){
    if(samePlayerLoose(p,state.profile))return {player:state.profile,sourceImage:ownSingleSource};
-   const rec=singleRecords.find(x=>samePlayerLoose(p,x.player)||samePlayerLoose(p,x.opponent));
+   const pid=normalizedPlayerId(p.id);
+   let rec=pid?singleRecords.find(x=>normalizedPlayerId(x.opponent.id)===pid||normalizedPlayerId(x.player.id)===pid):null;
+   if(!rec)rec=singleRecords.find(x=>samePlayerLoose(p,x.player)||samePlayerLoose(p,x.opponent));
    if(rec)return {player:rec.opponent,sourceImage:rec.sourceImage};
   }
   let hits=players.filter(q=>samePlayerLoose(p,q));
@@ -528,7 +547,7 @@ function ensureSingleOpponent(p,imageId){
   o={id:p.id||('single-local-'+crypto.randomUUID()),name:p.name||'Ukendt modstander',club:p.club||'',images:[],aiCreated:true};
   state.opponents.push(o);
  }
- if(p.name)o.name=p.name;if(p.club)o.club=p.club;
+ if(p.name)o.name=p.name;if(p.club)o.club=p.club;if(normalizedPlayerId(p.id))o.id=formattedPlayerId(p.id);
  if(p.single!=null)o.single=p.single;
  o.date=p.date||tournamentDate();
  o.images ||= [];
@@ -539,7 +558,7 @@ function syncSingleProfilesFromDraft(){
  if(activeDiscipline!=='single')return;
  const own=singleDraftResults('single-self').at(-1),p=playerFromDraftResult(own);
  if(p){
-  if(p.name)state.profile.name=p.name;if(p.id)state.profile.id=p.id;if(p.club)state.profile.club=p.club;
+  if(p.name)state.profile.name=p.name;if(normalizedPlayerId(p.id))state.profile.id=formattedPlayerId(p.id);if(p.club)state.profile.club=p.club;
   if(p.single!=null)state.profile.single=p.single;
   state.profile.date=p.date||tournamentDate();
   state.profile.confirmed=positive(state.profile.single);
