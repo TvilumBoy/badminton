@@ -2,7 +2,7 @@
 let batchFiles=[],batchBusy=false,disciplineSection='cleanup',disciplineMenuOpen=false;
 state.aiDrafts ||= {};
 const draftKey=()=>activeTournament+':'+activeDiscipline;
-function eventSwitch(id){if(activeTournament)state.baselines[activeTournament]=structuredClone(state.profile);activeTournament=id;state.profile=structuredClone(state.baselines[id]||{...state.profile,confirmed:false});save()}
+function eventSwitch(id){if(activeTournament)state.baselines[activeTournament]=structuredClone(state.profile);activeTournament=id;state.profile=profileForTournament(id);managedPlayerKey=playerForTournament(id)?.key||managedPlayerKey;save()}
 function openEvent(id){if(batchBusy)return toast('Vent til aflæsningen er færdig.');eventSwitch(id);view='event';activeDiscipline='all';batchFiles=[];render()}
 function openDiscipline(d){if(batchBusy)return toast('Vent til aflæsningen er færdig.');activeDiscipline=d;view='discipline';batchFiles=[];disciplineSection='cleanup';disciplineMenuOpen=false;render();window.scrollTo(0,0)}
 const doubleRoles={self:'Din egen profil',partner:'Din doublemakker',opponent1:'Modstander 1',opponent2:'Modstander 2'};
@@ -132,7 +132,7 @@ async function deleteActiveTournament(){
  batchFiles=[];
  const next=state.tournaments[0]||null;
  activeTournament=next?.id||'';
- if(next)state.profile=structuredClone(state.baselines[activeTournament]||{...state.profile,confirmed:false});
+ if(next){state.profile=profileForTournament(activeTournament);managedPlayerKey=playerForTournament(activeTournament)?.key||managedPlayerKey}
  state.selectedTournament=activeTournament;
  save();
  changeView('home');
@@ -219,7 +219,7 @@ function renderDisciplineFrontSummary(){
 }
 function renderFlow(){
  state.aiDrafts ||= {};
- $('#home-list').innerHTML=state.tournaments.map(t=>`<button class="event-card secondary" data-event="${esc(t.id)}"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><span>Åbn stævne →</span></button>`).join('')||'<div class="empty event-empty"><h3>Ingen stævner endnu</h3><p>Tryk “+ Tilføj nyt stævne” for at oprette dit første stævne.</p></div>';
+ $('#home-list').innerHTML=state.tournaments.map(t=>{const p=playerForTournament(t);return `<button class="event-card secondary" data-event="${esc(t.id)}"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><small class="event-player">Spiller: ${esc(p?.name||'Ikke valgt')}</small><span>Åbn stævne →</span></button>`}).join('')||'<div class="empty event-empty"><h3>Ingen stævner endnu</h3><p>Tryk “+ Tilføj nyt stævne” for at oprette dit første stævne.</p></div>';
  const t=state.tournaments.find(t=>t.id===activeTournament);
  $('#event-title').textContent=t?.name||'Stævne';$('#event-date').textContent=t?.date||'';$('#delete-tournament').hidden=!t;
  $('#discipline-choices').innerHTML=Object.entries(labels).map(([d,n])=>`<button class="discipline-card secondary" data-discipline="${d}"><strong>${n}</strong><small>${selectedMatches().filter(m=>m.discipline===d).length} kampe</small><span>Upload billeder →</span></button>`).join('');
@@ -688,7 +688,7 @@ async function requestImage(file,role='general',onWait=null){let data=await imag
 function initFlow(){
  const oldChange=changeView;changeView=function(v){if(batchBusy)return toast('Vent til aflæsningen er færdig.');oldChange(v)};
  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>changeView(b.dataset.view));
- $('#home-add').onclick=()=>{const remembered=cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'';if(remembered)$('#t-info-code').value=remembered;$('#tournament-dialog').showModal()};
+ $('#home-add').onclick=()=>{const remembered=cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'';if(remembered)$('#t-info-code').value=remembered;prepareTournamentDialog()};
  $('#t-info-upload').onclick=()=>{const code=($('#t-info-code').value||cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'').trim();if(!code){$('#t-info-status').textContent='Indtast adgangskoden til AI-aflæsning først.';$('#t-info-code').focus();return}$('#t-info-input').click()};
  $('#t-info-input').onchange=async e=>{
   const file=e.target.files?.[0];e.target.value='';if(!file)return;
