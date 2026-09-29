@@ -342,8 +342,8 @@ dialog::backdrop{background:rgba(1,5,10,.80);backdrop-filter:blur(7px)}
   .discipline-menu-button{padding:16px 18px;font-size:19px}
 }
 
-.event-card{position:relative;display:flex!important;align-items:center;justify-content:space-between;gap:20px;text-align:left}
-.event-card-main{display:flex;flex-direction:column;align-items:flex-start;gap:10px;min-width:0}
+.event-card{position:relative;display:flex!important;flex-direction:row!important;align-items:center;justify-content:space-between;gap:20px;text-align:left}
+.event-card-main{display:flex;flex:1 1 auto;flex-direction:column;align-items:flex-start;gap:10px;min-width:0}
 .event-card-main>strong{font-size:31px;line-height:1.05}
 .event-total-points{margin-left:auto;min-width:118px;text-align:right;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;line-height:1}
 .event-total-points b{font-size:42px;font-weight:950;letter-spacing:-.05em}
@@ -351,7 +351,7 @@ dialog::backdrop{background:rgba(1,5,10,.80);backdrop-filter:blur(7px)}
 .event-total-points.pending-total{color:var(--muted)}
 .event-finished{border-color:#315068!important}
 @media(max-width:520px){
- .event-card{gap:12px;padding-right:18px!important}
+ .event-card{flex-direction:row!important;gap:12px;padding-right:18px!important}
  .event-card-main>strong{font-size:27px}
  .event-total-points{min-width:92px}
  .event-total-points b{font-size:36px}
