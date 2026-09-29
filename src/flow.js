@@ -358,11 +358,61 @@ async function recalculateActiveDiscipline(){
 }
 async function imageData(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const TOURNAMENT_AI_CODE_KEY='badminton-tournament-ai-code';
+async function requestTournamentInfo(file){
+ const status=$('#t-info-status'),code=($('#t-info-code').value||cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'').trim();
+ if(!code){status.textContent='Indtast adgangskoden til AI-aflæsning først.';$('#t-info-code').focus();throw Error('Mangler adgangskode.')}
+ if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size>12*1024*1024)throw Error('Brug JPG, PNG eller WebP på højst 12 MB.');
+ const data=await imageData(file);
+ if(data.length>3500000)throw Error('Billedet fylder for meget til AI-aflæsning. Brug et screenshot på højst ca. 2,5 MB.');
+ sessionStorage.setItem(TOURNAMENT_AI_CODE_KEY,code);
+ for(let attempt=0;attempt<8;attempt++){
+  const r=await fetch('/api/tournament',{method:'POST',headers:{'Content-Type':'application/json','x-app-code':code},body:JSON.stringify({image:data})});
+  let body;try{body=await r.json()}catch{throw Error('AI-serveren er ikke tilgængelig på denne adresse.')}
+  if(r.status===429&&attempt<7){
+   const wait=Math.max(5,Number(body.retryAfterSeconds||20));
+   if(wait>90)throw Error(body.error||'AI-kvoten er nået. Prøv igen senere.');
+   status.textContent='AI holder en kort pause. Fortsætter automatisk om ca. '+wait+' sekunder …';
+   await sleep((wait+1)*1000);continue;
+  }
+  if(!r.ok)throw Error(body.error||'Stævneoplysningerne kunne ikke aflæses.');
+  return body;
+ }
+ throw Error('AI kunne ikke fortsætte efter flere automatiske forsøg.');
+}
+function applyTournamentInfo(info){
+ if(info.name)$('#t-name').value=info.name;
+ if(/^\d{4}-\d{2}-\d{2}$/.test(info.date||''))$('#t-date').value=info.date;
+ if(info.number)$('#t-number').value=info.number;
+ const levels=[...new Set((info.levels||[]).map(x=>String(x).trim()).filter(Boolean))];
+ const age=String(state.profile.age||'').trim();
+ const ageLevels=levels.filter(x=>!age||x.startsWith(age+' '));
+ if(ageLevels.length===1){
+  const option=[...$('#t-level').options].find(o=>o.value===ageLevels[0]);
+  if(option)$('#t-level').value=ageLevels[0];
+ }
+ const found=[info.name&&'navn',info.date&&'dato',info.number&&'turneringsnummer'].filter(Boolean);
+ let extra='';
+ if(ageLevels.length>1)extra=' Stævnet viser '+ageLevels.join(', ')+'. Vælg selv den række, du deltager i.';
+ else if(levels.length&&ageLevels.length===0)extra=' De synlige rækker er '+levels.join(', ')+'. Kontrollér rækken manuelt.';
+ $('#t-info-status').textContent=(found.length?'Aflæst '+found.join(', ')+'.':'Jeg fandt ikke sikre stævnefelter i informationsboksen.')+extra;
+}
 async function requestImage(file,role='general',onWait=null){let data=await imageData(file);if(data.length>3500000)throw Error(file.name+': Billedet fylder for meget til AI-aflæsning. Brug et screenshot på højst ca. 2,5 MB.');for(let attempt=0;attempt<8;attempt++){const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json','x-app-code':$('#ai-code').value},body:JSON.stringify({image:data,discipline:activeDiscipline,role})});let body;try{body=await r.json()}catch{throw Error('AI-serveren er ikke tilgængelig på denne adresse. Appen skal køre på Vercel med AI aktiveret.')}if(r.status===429&&attempt<7){const wait=Math.max(5,Number(body.retryAfterSeconds||20));if(wait>90)throw Error(body.error||'Den gratis dagskvote er nået. Prøv igen senere.');if(onWait)onWait(wait);await sleep((wait+1)*1000);continue}if(!r.ok)throw Error(body.error||'Aflæsning mislykkedes.');return body}throw Error('Groq kunne ikke fortsætte efter flere automatiske forsøg.')}
 function initFlow(){
  const oldChange=changeView;changeView=function(v){if(batchBusy)return toast('Vent til aflæsningen er færdig.');oldChange(v)};
  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>changeView(b.dataset.view));
- $('#home-add').onclick=()=>$('#tournament-dialog').showModal();
+ $('#home-add').onclick=()=>{const remembered=cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'';if(remembered)$('#t-info-code').value=remembered;$('#tournament-dialog').showModal()};
+ $('#t-info-upload').onclick=()=>$('#t-info-input').click();
+ $('#t-info-input').onchange=async e=>{
+  const file=e.target.files?.[0];e.target.value='';if(!file)return;
+  const preview=$('#t-info-preview'),status=$('#t-info-status');
+  preview.src=URL.createObjectURL(file);preview.hidden=false;
+  status.textContent='Aflæser kun stævneinformationsboksen under “Turneringsresultater og Program” …';
+  $('#t-info-upload').disabled=true;
+  try{const info=await requestTournamentInfo(file);applyTournamentInfo(info);toast('Stævneoplysningerne er udfyldt. Kontrollér dem før du opretter stævnet.')}
+  catch(err){status.textContent=err.message||'Screenshot kunne ikke aflæses.'}
+  finally{$('#t-info-upload').disabled=false}
+ };
  $('#discipline-menu-button').onclick=e=>{e.stopPropagation();disciplineMenuOpen=!disciplineMenuOpen;renderDisciplineMenu()};
  $('#discipline-menu').onclick=e=>{const manual=e.target.closest('[data-discipline-action="manual"]');if(manual){disciplineMenuOpen=false;renderDisciplineMenu();openMatch();return}const b=e.target.closest('[data-discipline-section]');if(!b)return;setDisciplineSection(b.dataset.disciplineSection)};
 
@@ -371,7 +421,7 @@ function initFlow(){
  $('#open-discipline-players').onclick=()=>changeView('discipline-players');$('#players-back').onclick=()=>changeView('discipline');
  $('#ai-player-form').onsubmit=e=>{e.preventDefault();applyAiPlayerEdit()};
  $('#tournament-select').onchange=e=>openEvent(e.target.value);
- const oldSubmit=$('#tournament-form').onsubmit;$('#tournament-form').onsubmit=e=>{oldSubmit(e);view='event';activeDiscipline='all';render()};
+ const oldSubmit=$('#tournament-form').onsubmit;$('#tournament-form').onsubmit=e=>{oldSubmit(e);view='event';activeDiscipline='all';const preview=$('#t-info-preview');if(preview){preview.hidden=true;preview.removeAttribute('src')}const status=$('#t-info-status');if(status)status.textContent='Appen læser kun informationsboksen under “Turneringsresultater og Program” og stopper før række-, klub- og spillervalg.';render()};
  $('#batch-input').onchange=async e=>{const files=[...e.target.files];e.target.value='';if(files.length>15)return toast('Vælg højst 15 billeder ad gangen.');if(files.some(f=>!/^image\/(jpeg|png|webp)$/.test(f.type)||f.size>12*1024*1024))return toast('Brug JPG, PNG eller WebP på højst 12 MB pr. billede.');batchFiles=[];for(const file of files){try{batchFiles.push(await storeBatchFile(file,'general'))}catch{toast('Et billede kunne ikke gemmes.')}}save();renderFlow();$('#batch-status').textContent='Billederne er gemt. AI-aflæsning sender de valgte billeder til Groq Cloud.'};
  $('#double-self-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('self',files)};
  $('#double-partner-input').onchange=e=>{const files=[...e.target.files];e.target.value='';setDoubleSlot('partner',files)};
