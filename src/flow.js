@@ -223,6 +223,7 @@ function renderFlow(){
  $('#discipline-title').textContent=(t?.name||'Stævne')+' · '+(labels[activeDiscipline]||'');
  $('#discipline-help').textContent=activeDiscipline==='single'?'Upload egen spillerprofil, modstanderprofiler og kampprogram eller resultater.':activeDiscipline==='double'?'Upload de fire spillerprofiler fra i dag og derefter billeder af kampen/resultatet. Til sidst starter du én samlet aflæsning.':'Upload egen profil, din makkers profil, begge modstanderes profiler og kampprogram eller resultater.';
  const isDouble=activeDiscipline==='double',isSingle=activeDiscipline==='single';
+ if(isSingle)syncSingleSavedMatchData();
  const uploads=scopedUploads();
  const uploadPanel=$('#ai-upload-panel'),uploadTarget=isSingle?$('#upload-panel-main'):((uploads.length&&!(view==='discipline'&&batchFiles.length))?$('#upload-panel-more'):$('#upload-panel-main'));
  if(uploadPanel&&uploadTarget&&uploadPanel.parentElement!==uploadTarget)uploadTarget.appendChild(uploadPanel);
@@ -260,12 +261,55 @@ const norm=s=>String(s||'').normalize('NFC').trim().toLocaleLowerCase('da-DK');
 function samePlayer(a,b){return a.id&&b.id?a.id===b.id:!!a.name&&norm(a.name)===norm(b.name)}
 function nameKey(s){return norm(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim()}
 function levenshtein(a,b){a=nameKey(a);b=nameKey(b);const m=a.length,n=b.length;if(!m)return n;if(!n)return m;const row=Array.from({length:n+1},(_,i)=>i);for(let i=1;i<=m;i++){let prev=row[0];row[0]=i;for(let j=1;j<=n;j++){const tmp=row[j],cost=a[i-1]===b[j-1]?0:1;row[j]=Math.min(row[j]+1,row[j-1]+1,prev+cost);prev=tmp}}return row[n]}
-function samePlayerLoose(a,b){if(!(a&&b))return false;if(a.id&&b.id&&a.id===b.id)return true;if(a.name&&b.name&&norm(a.name)===norm(b.name))return true;if(!a.name||!b.name)return false;const aa=nameKey(a.name).split(' ').filter(Boolean),bb=nameKey(b.name).split(' ').filter(Boolean);if(!aa.length||!bb.length)return false;const sameEnds=aa[0]===bb[0]&&aa[aa.length-1]===bb[bb.length-1];const sameClub=!a.club||!b.club||nameKey(a.club)===nameKey(b.club);return sameEnds&&sameClub&&levenshtein(a.name,b.name)<=2}
+function samePlayerLoose(a,b){if(!(a&&b))return false;if(a.id&&b.id&&a.id===b.id)return true;if(a.name&&b.name&&norm(a.name)===norm(b.name))return true;if(!a.name||!b.name)return false;const aa=nameKey(a.name).split(' ').filter(Boolean),bb=nameKey(b.name).split(' ').filter(Boolean);if(!aa.length||!bb.length)return false;const sameClub=!a.club||!b.club||nameKey(a.club)===nameKey(b.club),firstSame=aa[0]===bb[0],fullDistance=levenshtein(a.name,b.name),lastDistance=levenshtein(aa[aa.length-1],bb[bb.length-1]),sameMiddle=aa.length>2&&bb.length>2&&aa.slice(1,-1).join(' ')===bb.slice(1,-1).join(' ');return sameClub&&firstSame&&(fullDistance<=2||(sameMiddle&&lastDistance<=2))}
 function tournamentDate(){return state.tournaments.find(t=>t.id===activeTournament)?.date||''}
 function combinedPlayers(draft){const map=[];const eventDate=tournamentDate();for(const image of draft?.results||[])for(const raw of image.data.players){const p={...raw,date:raw.date||eventDate};let q=map.find(x=>samePlayer(x,p));if(!q){q={...p,images:[],conflicts:[]};map.push(q)}else{if(!q.id&&p.id)q.id=p.id;if(!q.name&&p.name)q.name=p.name;if(!q.club&&p.club)q.club=p.club;if(!q.date&&p.date)q.date=p.date}for(const d of ['single','double','mix'])if(p[d]!=null){if(q[d]!=null&&q[d]!==p[d])q.conflicts.push(d);else q[d]=p[d]}q.images.push(image.id)}return map}
-function proposalMatches(draft){const players=combinedPlayers(draft),out=[];const rating=p=>{let hits=players.filter(q=>samePlayerLoose(p,q));if(hits.length!==1&&p?.name)hits=players.filter(q=>q.name&&norm(q.name)===norm(p.name));if(hits.length===1&&!hits[0].conflicts.includes(activeDiscipline)&&positive(hits[0][activeDiscipline]))return hits[0][activeDiscipline];if(samePlayerLoose(p,state.profile))return state.profile[activeDiscipline]??'';return ''};const detail=p=>({id:p.id||'',name:p.name||'',club:p.club||'',points:rating(p)});
- for(const image of draft?.results||[])for(const m of image.data.matches){const expectedCount=activeDiscipline==='single'?1:2;const inferredSelected=m.discipline==='unknown'&&m.sideA?.length===expectedCount&&m.sideB?.length===expectedCount;if(m.discipline!==activeDiscipline&&!inferredSelected)continue;const a=m.sideA.some(p=>samePlayerLoose(p,state.profile)),b=m.sideB.some(p=>samePlayerLoose(p,state.profile));if(a===b)continue;const own=a?m.sideA:m.sideB,other=a?m.sideB:m.sideA;const n=activeDiscipline==='single'?1:2;if(own.length!==n||other.length!==n)continue;const scores=m.sets.map(s=>a?`${s.a}-${s.b}`:`${s.b}-${s.a}`).join(', ');const partner=own.find(p=>!samePlayerLoose(p,state.profile));const p={id:'',tournament:activeTournament,discipline:activeDiscipline,opponent:other.map(p=>p.name).join(' / '),club:other.map(p=>p.club).filter(Boolean).join(' / '),opponentId:activeDiscipline==='single'&&state.opponents.some(o=>o.id===other[0].id)?other[0].id:'',scores,result:resultFromScores(scores)||'pending',round:m.round,points:rating(other[0]),partnerPoints:partner?rating(partner):'',opponentPartnerPoints:other[1]?rating(other[1]):'',status:m.status==='normal'?'normal':'special',confirmed:false,notes:'',sourceImage:image.id,opponentIds:other.map(p=>p.id).filter(Boolean),partnerName:partner?.name||'',ownPlayers:own.map(detail),opponentPlayers:other.map(detail)};
- if(!out.some(x=>x.opponent===p.opponent&&x.round===p.round&&x.scores===p.scores))out.push(p)}return out}
+function proposalMatches(draft){
+ const players=combinedPlayers(draft),out=[];
+ const singleRecords=activeDiscipline==='single'?singleOpponentRecords():[];
+ const ownSingleSource=activeDiscipline==='single'?singleDraftResults('single-self').at(-1)?.id||'':'';
+ const knownPlayer=p=>{
+  if(!p)return null;
+  if(activeDiscipline==='single'){
+   if(samePlayerLoose(p,state.profile))return {player:state.profile,sourceImage:ownSingleSource};
+   const rec=singleRecords.find(x=>samePlayerLoose(p,x.player)||samePlayerLoose(p,x.opponent));
+   if(rec)return {player:rec.opponent,sourceImage:rec.sourceImage};
+  }
+  let hits=players.filter(q=>samePlayerLoose(p,q));
+  if(hits.length!==1&&p?.name)hits=players.filter(q=>q.name&&norm(q.name)===norm(p.name));
+  return hits.length===1?{player:hits[0],sourceImage:hits[0].images?.[0]||''}:null;
+ };
+ const rating=p=>{const known=knownPlayer(p);if(known&&!known.player.conflicts?.includes(activeDiscipline)&&positive(known.player[activeDiscipline]))return known.player[activeDiscipline];if(samePlayerLoose(p,state.profile))return state.profile[activeDiscipline]??'';return ''};
+ const detail=p=>{const known=knownPlayer(p)?.player||p;return {id:known.id||p.id||'',name:known.name||p.name||'',club:known.club||p.club||'',points:rating(p)}};
+ for(const image of draft?.results||[])for(const m of image.data.matches){
+  const expectedCount=activeDiscipline==='single'?1:2;
+  const inferredSelected=m.discipline==='unknown'&&m.sideA?.length===expectedCount&&m.sideB?.length===expectedCount;
+  if(m.discipline!==activeDiscipline&&!inferredSelected)continue;
+  const a=m.sideA.some(p=>samePlayerLoose(p,state.profile)),b=m.sideB.some(p=>samePlayerLoose(p,state.profile));
+  if(a===b)continue;
+  const own=a?m.sideA:m.sideB,other=a?m.sideB:m.sideA,n=activeDiscipline==='single'?1:2;
+  if(own.length!==n||other.length!==n)continue;
+  const scores=m.sets.map(s=>a?`${s.a}-${s.b}`:`${s.b}-${s.a}`).join(', ');
+  const partner=own.find(p=>!samePlayerLoose(p,state.profile));
+  const knownOpponent=activeDiscipline==='single'?knownPlayer(other[0]):null;
+  const opponentDetails=other.map(detail),ownDetails=own.map(detail);
+  const canonicalOpponent=knownOpponent?.player||other[0];
+  const p={
+   id:'',tournament:activeTournament,discipline:activeDiscipline,
+   opponent:activeDiscipline==='single'?(canonicalOpponent.name||other[0].name||''):other.map(p=>p.name).join(' / '),
+   club:activeDiscipline==='single'?(canonicalOpponent.club||other[0].club||''):other.map(p=>p.club).filter(Boolean).join(' / '),
+   opponentId:activeDiscipline==='single'?(canonicalOpponent.id||''):(state.opponents.some(o=>o.id===other[0].id)?other[0].id:''),
+   scores,result:resultFromScores(scores)||'pending',round:m.round,points:rating(other[0]),
+   partnerPoints:partner?rating(partner):'',opponentPartnerPoints:other[1]?rating(other[1]):'',
+   status:m.status==='normal'?'normal':'special',confirmed:false,notes:'',sourceImage:image.id,
+   opponentProfileImage:activeDiscipline==='single'?(knownOpponent?.sourceImage||''):'',
+   opponentIds:activeDiscipline==='single'?(canonicalOpponent.id?[canonicalOpponent.id]:[]):other.map(p=>p.id).filter(Boolean),
+   partnerName:partner?.name||'',ownPlayers:ownDetails,opponentPlayers:opponentDetails
+  };
+  if(!out.some(x=>sameSingleOpponent(x,p)&&x.round===p.round&&x.scores===p.scores))out.push(p);
+ }
+ return out;
+}
 
 function singleDraftResults(role){
  const draft=state.aiDrafts[draftKey()];
@@ -350,6 +394,19 @@ function reconcileManualWithScreenshot(m,p){
  if(p.ownPlayers?.length)m.ownPlayers=structuredClone(p.ownPlayers);
  if(p.opponentPlayers?.length)m.opponentPlayers=structuredClone(p.opponentPlayers);
  updateSingleConflict(m);
+}
+function syncSingleSavedMatchData(){
+ if(activeDiscipline!=='single')return;
+ const proposals=latestSingleProposals(state.aiDrafts[draftKey()]);
+ for(const m of selectedMatches().filter(m=>m.discipline==='single')){
+  const p=proposals.find(p=>sameSingleOpponent(m,p));if(!p)continue;
+  if(p.opponent)m.opponent=p.opponent;if(p.club)m.club=p.club;if(p.opponentId)m.opponentId=p.opponentId;
+  if(positive(p.points))m.points=p.points;
+  if(p.opponentProfileImage)m.opponentProfileImage=p.opponentProfileImage;
+  if(p.ownPlayers?.length)m.ownPlayers=structuredClone(p.ownPlayers);
+  if(p.opponentPlayers?.length)m.opponentPlayers=structuredClone(p.opponentPlayers);
+  if(m.manualResult)reconcileManualWithScreenshot(m,p);
+ }
 }
 function renderSingleWorkspace(){
  if(activeDiscipline!=='single')return;
@@ -513,7 +570,7 @@ let aiProposals=[];
 function renderDraft(){const draft=state.aiDrafts[draftKey()],ps=combinedPlayers(draft);aiProposals=proposalMatches(draft);if(!draft){$('#ai-warnings').innerHTML='';$('#ai-matches').innerHTML='<p class="muted">Ingen aflæsning endnu. Upload og aflæs billeder under “Billeder og oprydning”.</p>';return}
  $('#ai-warnings').innerHTML=[...new Set(draft.results.flatMap(r=>r.data.warnings))].map(w=>`<li>${esc(w)}</li>`).join('');
  $('#ai-players').innerHTML=ps.map((p,i)=>{const shownDate=p.date?p.date.split('-').reverse().join('.'):'Dato mangler';return `<article class="review-player"><strong>${esc(p.name)}</strong><small>${esc(p.id||'ID mangler')} · ${esc(p.club)} · ${esc(shownDate)}</small><p>${labels[activeDiscipline]}: ${p.conflicts.includes(activeDiscipline)?'Modstridende point — kontrollér billederne':esc(p[activeDiscipline]??'Point mangler')}</p><div class="actions"><button class="secondary" data-edit-ai-player="${i}">Rediger profil</button><button class="secondary" data-ai-player="${i}">${samePlayer(p,state.profile)?'Kontrollér mine startpoint':'Gem profil og billeder'}</button></div><button class="link-btn" data-image="${esc(p.images[0])}">Se kildebillede</button><button class="danger" data-delete-ai-player="${i}">Fjern aflæst profil</button></article>`}).join('')||'<p>Ingen spillerprofiler aflæst endnu.</p>';
- $('#ai-matches').innerHTML=aiProposals.map((p,i)=>`<article class="versus-card"><div class="between"><strong>${esc(p.round||'Kamp')}</strong><span class="${p.result==='win'?'good':p.result==='loss'?'bad':'muted'}">${p.result==='win'?'Sejr':p.result==='loss'?'Nederlag':'Afventer'}</span></div>${matchupHtml(p)}<div class="versus-score">${esc(p.scores||'Planlagt')}</div>${proposalPointPreview(p)}<div class="actions"><button class="secondary" data-ai-match="${i}">Kontrollér og gem kamp</button><button class="link-btn" data-image="${esc(p.sourceImage)}">Se resultatbillede</button><button class="danger" data-delete-ai-match="${i}">Fjern aflæst kamp</button></div></article>`).join('')||'<p>Ingen entydige kampe fundet for din spiller og denne disciplin. Kontrollér spillerprofilerne, eller tilføj kampen manuelt.</p>';
+ $('#ai-matches').innerHTML=aiProposals.map((p,i)=>{const profileLink=activeDiscipline==='single'&&p.opponentProfileImage?`<button class="link-btn" data-image="${esc(p.opponentProfileImage)}">Se modstanderprofil</button>`:'';const resultLabel=activeDiscipline==='single'?'Se pulje/resultatbillede':'Se resultatbillede';return `<article class="versus-card"><div class="between"><strong>${esc(p.round||'Kamp')}</strong><span class="${p.result==='win'?'good':p.result==='loss'?'bad':'muted'}">${p.result==='win'?'Sejr':p.result==='loss'?'Nederlag':'Afventer'}</span></div>${matchupHtml(p)}<div class="versus-score">${esc(p.scores||'Planlagt')}</div>${proposalPointPreview(p)}<div class="actions"><button class="secondary" data-ai-match="${i}">Kontrollér og gem kamp</button>${profileLink}<button class="link-btn" data-image="${esc(p.sourceImage)}">${resultLabel}</button><button class="danger" data-delete-ai-match="${i}">Fjern aflæst kamp</button></div></article>`}).join('')||'<p>Ingen entydige kampe fundet for din spiller og denne disciplin. Kontrollér spillerprofilerne, eller tilføj kampen manuelt.</p>';
 }
 function rebuildAiMatchesFromDraft(){
  const ids=new Set(scopedUploads().map(u=>u.id));
