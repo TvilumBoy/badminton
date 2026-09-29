@@ -149,10 +149,9 @@ function setDisciplineSection(section){
  const nav=$('.discipline-nav');if(nav)nav.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function renderDisciplineMenu(){
- const labelsMap={cleanup:'1. Billeder og oprydning',review:'2. Kontrollér aflæsningen',points:'3. Kampe og forventede point',notes:'4. Resultat og noter'};
  const menu=$('#discipline-menu'),button=$('#discipline-menu-button'),label=$('#discipline-menu-label');
  if(!menu||!button||!label)return;
- label.textContent=labelsMap[disciplineSection]||labelsMap.cleanup;
+ label.textContent='Menu';
  menu.hidden=!disciplineMenuOpen;button.setAttribute('aria-expanded',disciplineMenuOpen?'true':'false');
  ['cleanup','review','points','notes'].forEach(s=>{const pane=$('#discipline-pane-'+s);if(pane)pane.hidden=s!==disciplineSection;const b=menu.querySelector('[data-discipline-section="'+s+'"]');if(b)b.setAttribute('aria-current',s===disciplineSection?'true':'false')});
 }
@@ -198,21 +197,25 @@ function saveSimpleResultAndNote(id){
  save();render();disciplineSection='notes';renderDisciplineMenu();toast('Resultat og noter er gemt.');
 }
 function renderDisciplineFrontSummary(){
- const totalBox=$('#discipline-front-total'),matchesBox=$('#discipline-front-matches');if(!totalBox||!matchesBox)return;
+ const box=$('#discipline-front-summary'),label=$('#discipline-front-summary-label'),totalBox=$('#discipline-front-total'),matchesBox=$('#discipline-front-matches');
+ if(!box||!label||!totalBox||!matchesBox)return;
  const ms=selectedMatches().filter(m=>m.discipline===activeDiscipline);
- const played=ms.filter(m=>m.result!=='pending');
+ const played=ms.filter(m=>m.result!=='pending'||String(m.scores||'').trim());
+ const hasResults=played.length>0,wasHidden=box.hidden;
+ box.hidden=!hasResults;
+ if(!hasResults){box.open=false;totalBox.innerHTML='';matchesBox.innerHTML='';label.textContent='';return}
+ if(wasHidden)box.open=true;
+ label.textContent=played.length===1?'1 kamp med resultat':played.length+' kampe med resultat';
  const calculations=played.map(m=>({m,c:calculation(m)}));
  const ready=calculations.filter(x=>x.c.delta!==undefined);
- const allReady=played.length>0&&ready.length===played.length;
+ const allReady=ready.length===played.length;
  if(allReady){
   const sum=ready.reduce((s,x)=>s+x.c.delta,0),start=Number(state.profile[activeDiscipline]),expected=Number.isFinite(start)?start+sum:null;
-  totalBox.innerHTML=`<strong class="${sum>=0?'good':'bad'}">${esc(signed(sum))} point</strong><span>${expected!==null?'Forventet '+esc(fmt(expected))+' point':'Samlet ændring for stævnet'}</span>`;
- }else if(played.length){
-  totalBox.innerHTML=`<strong>Afventer point</strong><span>${ready.length} af ${played.length} spillede kampe er klar til beregning</span>`;
+  totalBox.innerHTML=`<strong class="${sum>=0?'good':'bad'}">${esc(signed(sum))} point</strong><span>${expected!==null?'Forventet '+esc(fmt(expected))+' point':'Samlet ændring'}</span>`;
  }else{
-  totalBox.innerHTML='<strong>Ingen resultater endnu</strong><span>Resultater og point vises her, når kampene er klar.</span>';
+  totalBox.innerHTML=`<strong>Resultater gemt</strong><span>${ready.length} af ${played.length} er klar til pointberegning</span>`;
  }
- matchesBox.innerHTML=ms.map(m=>{const c=calculation(m),n=simpleMatchNames(m),result=m.result==='win'?'Sejr':m.result==='loss'?'Nederlag':'Afventer',score=m.scores||'Resultat mangler',delta=c.delta!==undefined?signed(c.delta)+' point':c.reason||'Afventer';return `<div class="discipline-front-match"><div><b>${esc(n.opp)}</b><small>${esc(score)} · ${esc(result)}</small></div><span class="discipline-front-delta ${c.delta!==undefined?(c.delta>=0?'good':'bad'):'muted'}">${esc(delta)}</span></div>`}).join('');
+ matchesBox.innerHTML=played.map(m=>{const c=calculation(m),n=simpleMatchNames(m),result=m.result==='win'?'Sejr':m.result==='loss'?'Nederlag':'Resultat gemt',score=m.scores||'Resultat',delta=c.delta!==undefined?signed(c.delta)+' point':c.reason||'Afventer';return `<div class="discipline-front-match"><div><b>${esc(n.opp)}</b><small>${esc(score)} · ${esc(result)}</small></div><span class="discipline-front-delta ${c.delta!==undefined?(c.delta>=0?'good':'bad'):'muted'}">${esc(delta)}</span></div>`}).join('');
 }
 function renderFlow(){
  state.aiDrafts ||= {};
@@ -221,7 +224,7 @@ function renderFlow(){
  $('#event-title').textContent=t?.name||'Stævne';$('#event-date').textContent=t?.date||'';$('#delete-tournament').hidden=!t;
  $('#discipline-choices').innerHTML=Object.entries(labels).map(([d,n])=>`<button class="discipline-card secondary" data-discipline="${d}"><strong>${n}</strong><small>${selectedMatches().filter(m=>m.discipline===d).length} kampe</small><span>Upload billeder →</span></button>`).join('');
  $('#discipline-title').textContent=(t?.name||'Stævne')+' · '+(labels[activeDiscipline]||'');
- $('#discipline-help').textContent=activeDiscipline==='single'?'Upload egen spillerprofil, modstanderprofiler og kampprogram eller resultater.':activeDiscipline==='double'?'Upload de fire spillerprofiler fra i dag og derefter billeder af kampen/resultatet. Til sidst starter du én samlet aflæsning.':'Upload egen profil, din makkers profil, begge modstanderes profiler og kampprogram eller resultater.';
+ $('#discipline-help').textContent='';
  const isDouble=activeDiscipline==='double',isSingle=activeDiscipline==='single';
  if(isSingle)syncSingleSavedMatchData();
  const uploads=scopedUploads();
