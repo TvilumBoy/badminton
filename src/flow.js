@@ -142,6 +142,23 @@ function saveSimpleResultAndNote(id){
  const inferred=resultFromScores(score);if(inferred)m.result=inferred;
  save();render();disciplineSection='notes';renderDisciplineMenu();toast('Resultat og noter er gemt.');
 }
+function renderDisciplineFrontSummary(){
+ const totalBox=$('#discipline-front-total'),matchesBox=$('#discipline-front-matches');if(!totalBox||!matchesBox)return;
+ const ms=selectedMatches().filter(m=>m.discipline===activeDiscipline);
+ const played=ms.filter(m=>m.result!=='pending');
+ const calculations=played.map(m=>({m,c:calculation(m)}));
+ const ready=calculations.filter(x=>x.c.delta!==undefined);
+ const allReady=played.length>0&&ready.length===played.length;
+ if(allReady){
+  const sum=ready.reduce((s,x)=>s+x.c.delta,0),start=Number(state.profile[activeDiscipline]),expected=Number.isFinite(start)?start+sum:null;
+  totalBox.innerHTML=`<strong class="${sum>=0?'good':'bad'}">${esc(signed(sum))} point</strong><span>${expected!==null?'Forventet '+esc(fmt(expected))+' point':'Samlet ændring for stævnet'}</span>`;
+ }else if(played.length){
+  totalBox.innerHTML=`<strong>Afventer point</strong><span>${ready.length} af ${played.length} spillede kampe er klar til beregning</span>`;
+ }else{
+  totalBox.innerHTML='<strong>Ingen resultater endnu</strong><span>Resultater og point vises her, når kampene er klar.</span>';
+ }
+ matchesBox.innerHTML=ms.map(m=>{const c=calculation(m),n=simpleMatchNames(m),result=m.result==='win'?'Sejr':m.result==='loss'?'Nederlag':'Afventer',score=m.scores||'Resultat mangler',delta=c.delta!==undefined?signed(c.delta)+' point':c.reason||'Afventer';return `<div class="discipline-front-match"><div><b>${esc(n.opp)}</b><small>${esc(score)} · ${esc(result)}</small></div><span class="discipline-front-delta ${c.delta!==undefined?(c.delta>=0?'good':'bad'):'muted'}">${esc(delta)}</span></div>`}).join('');
+}
 function renderFlow(){
  state.aiDrafts ||= {};
  $('#home-list').innerHTML=state.tournaments.map(t=>`<button class="event-card secondary" data-event="${esc(t.id)}"><strong>${esc(t.name)}</strong><small>${esc(t.date)} · ${esc(t.level)}</small><span>Åbn stævne →</span></button>`).join('');
@@ -177,6 +194,7 @@ function renderFlow(){
  if(labels[activeDiscipline]){const a=totals(activeDiscipline),el=$('#discipline-total');if(a.count&&a.ready===a.count){const expected=Number(state.profile[activeDiscipline])+a.sum;el.innerHTML=`<strong class="${a.sum>=0?'good':'bad'}">${esc(signed(a.sum))} point</strong><span>Forventet ${esc(fmt(expected))} point</span>`}else el.innerHTML='<span>Point vises, når startpoint og kampoplysninger er godkendt.</span>'}
  renderDraft();
  renderDisciplineNotes();
+ renderDisciplineFrontSummary();
  renderDisciplineMenu();
 }
 const norm=s=>String(s||'').normalize('NFC').trim().toLocaleLowerCase('da-DK');
