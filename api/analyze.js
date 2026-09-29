@@ -41,6 +41,9 @@ const roleText=role=>({
   partner:'This screenshot is the doubles partner profile from today. '+profileRegionRule,
   opponent1:'This screenshot is opponent 1 profile from today. '+profileRegionRule,
   opponent2:'This screenshot is opponent 2 profile from today. '+profileRegionRule,
+  'single-self':'This screenshot is the user/player own SINGLE profile before the tournament matches. '+profileRegionRule+' Return exactly one player and no matches.',
+  'single-opponent':'This screenshot is ONE upcoming SINGLE opponent player profile. '+profileRegionRule+' Return exactly one player and no matches.',
+  'single-pool':'This screenshot is a BadmintonPlayer SINGLE pool/program/results overview. Read EVERY visible singles match in the visible pool, including scheduled matches without a result and completed matches with scores. One player belongs to each side. Empty sets are allowed only when no result is visible. If scores are visible, return all visible sets exactly. Do not read player ratings from this pool overview; ratings come from separate profile screenshots.',
   result:'This is specifically a BadmintonPlayer match/program/result screenshot. Read every visible score. A score like 15/11,15/9 belongs to the immediately preceding two pairs and MUST be returned as sets [{a:15,b:11},{a:15,b:9}]. Do not leave sets empty when such a numeric score is visible.',
   general:'The screenshot role is not predetermined.'
 }[role]||'The screenshot role is not predetermined.');
