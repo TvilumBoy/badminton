@@ -66,16 +66,17 @@ async function setDoublePlanCount(count){
   const draft=state.aiDrafts[draftKey()];if(draft)draft.results=draft.results.filter(r=>!ids.has(r.id));
   state.matches=state.matches.filter(m=>!(m.tournament===activeTournament&&m.discipline==='double'&&Number(m.plannedDoubleMatch)>count));
  }
- plan.count=count;save();render();
+ plan.count=count;delete plan.addingFrom;save();render();
 }
 function addMoreDoubleMatches(amount){
  amount=Math.max(1,Math.min(5,Number(amount)||1));
  const plan=doublePlan(),old=Number(plan.count)||0;
  if(!old)return setDoublePlanCount(amount);
+ plan.addingFrom=old+1;
  plan.count=old+amount;
  save();render();
  requestAnimationFrame(()=>{const target=document.querySelector('[data-double-role="'+doubleOpponentRole(old+1,1)+'"]')?.closest('.double-match-plan');if(target)target.scrollIntoView({behavior:'smooth',block:'start'})});
- toast(amount===1?'1 ny kamp er tilføjet.':amount+' nye kampe er tilføjet.');
+ toast(amount===1?'1 ny kamp er tilføjet. Upload nu de 2 modstanderprofiler.':amount+' nye kampe er tilføjet. Upload nu de nye modstanderprofiler.');
 }
 function ensureDoubleOpponent(p,imageId){
  if(!p)return null;
@@ -329,14 +330,18 @@ function renderFlow(){
  $('#batch-count').textContent=batchFiles.length?`${batchFiles.length} nye billeder valgt`:'Ingen nye billeder valgt';
  if(isDouble){
   $('#double-self-name').textContent=doubleSlotSummary('self');$('#double-partner-name').textContent=doubleSlotSummary('partner');
-  const baseReady=doubleBaseReady(),plan=doublePlan(),count=Number(plan.count)||0;
-  $('#double-plan-step').hidden=!baseReady;
+  const baseReady=doubleBaseReady(),plan=doublePlan(),count=Number(plan.count)||0,addingFrom=Number(plan.addingFrom)||0;
+  $('#double-own-step').hidden=!!count;
+  $('#double-plan-step').hidden=!baseReady||(count>0&&!addingFrom);
   $('#double-plan-counts').hidden=!!count;
+  $('#double-plan-heading').textContent=addingFrom?'Upload modstandere til de nye kampe':'2. Hvor mange kampe vil du planlægge nu?';
+  $('#double-plan-help').textContent=addingFrom?'Upload to spillerprofiler til hver ny kamp. De eksisterende kampe ændres ikke.':'Vælg mellem 1 og 5. Hver kamp kræver to modstanderprofiler.';
   document.querySelectorAll('[data-double-plan]').forEach(b=>b.classList.toggle('active',Number(b.dataset.doublePlan)===count));
-  $('#double-plan-selected').textContent=count?('Du har '+count+' planlagt '+(count===1?'kamp':'kampe')+'. Nye kampe tilføjes under “Spillerprofiler og kampe”.'):'Vælg 1, 2, 3, 4 eller 5 kampe.';
-  $('#double-match-slots').innerHTML=count?Array.from({length:count},(_,idx)=>{const n=idx+1,r1=doubleOpponentRole(n,1),r2=doubleOpponentRole(n,2);return `<section class="double-match-plan"><h4>Kamp ${n}</h4><div class="double-opponent-grid"><label class="upload-box"><strong>Modstander 1</strong><small>${esc(doubleSlotSummary(r1))}</small><input type="file" accept="image/jpeg,image/png,image/webp" data-double-role="${r1}"></label><label class="upload-box"><strong>Modstander 2</strong><small>${esc(doubleSlotSummary(r2))}</small><input type="file" accept="image/jpeg,image/png,image/webp" data-double-role="${r2}"></label></div></section>`}).join(''):'';
+  $('#double-plan-selected').textContent=addingFrom?('Nye kampe: '+addingFrom+'–'+count):count?('Du har '+count+' planlagt '+(count===1?'kamp':'kampe')+'.'):'Vælg 1, 2, 3, 4 eller 5 kampe.';
+  const firstShown=addingFrom||1;
+  $('#double-match-slots').innerHTML=count?Array.from({length:count-firstShown+1},(_,idx)=>{const n=firstShown+idx,r1=doubleOpponentRole(n,1),r2=doubleOpponentRole(n,2);return `<section class="double-match-plan"><h4>Kamp ${n}</h4><div class="double-opponent-grid"><label class="upload-box"><strong>Modstander 1</strong><small>${esc(doubleSlotSummary(r1))}</small><input type="file" accept="image/jpeg,image/png,image/webp" data-double-role="${r1}"></label><label class="upload-box"><strong>Modstander 2</strong><small>${esc(doubleSlotSummary(r2))}</small><input type="file" accept="image/jpeg,image/png,image/webp" data-double-role="${r2}"></label></div></section>`}).join(''):'';
   const readyCount=doubleRequiredRoles().filter(doubleRoleAvailable).length,total=doubleRequiredRoles().length;
-  $('#double-batch-count').textContent=baseReady?(count?`${readyCount} af ${total} nødvendige profiler uploadet.`:'Vælg antal kampe for at fortsætte.'):'Upload først de to profiler på dit eget hold.';
+  $('#double-batch-count').textContent=addingFrom?'Upload profilerne ovenfor og tryk derefter på aflæsningsknappen.':baseReady?(count?`${readyCount} af ${total} nødvendige profiler uploadet.`:'Vælg antal kampe for at fortsætte.'):'Upload først de to profiler på dit eget hold.';
  }
  $('#batch-analyze').hidden=isSingle||(isDouble&&!doublePlan().count);
  $('#batch-analyze').textContent=isDouble?'Aflæs profiler og opret planlagte kampe':'Aflæs billeder med Groq';
@@ -345,11 +350,15 @@ function renderFlow(){
  ['self','partner'].forEach(role=>{const el=$('#double-'+role+'-input');if(el)el.disabled=batchBusy});document.querySelectorAll('[data-double-role]').forEach(el=>el.disabled=batchBusy);
  ['single-self-input','single-opponent-input','single-pool-input','single-manual-save'].forEach(id=>{const el=$('#'+id);if(el)el.disabled=batchBusy});
  if(isSingle)renderSingleWorkspace();
- const addMore=$('#double-add-more');
+ const addMore=$('#double-add-more'),cleanupInfo=$('#cleanup-default-info'),cleanupUploads=$('#cleanup-upload-actions'),uploadMain=$('#upload-panel-main');
  if(addMore){
-  const count=isDouble?(Number(doublePlan().count)||0):0;
+  const plan=isDouble?doublePlan():{},count=isDouble?(Number(plan.count)||0):0,addingFrom=isDouble?(Number(plan.addingFrom)||0):0,compact=isDouble&&count>0&&!addingFrom;
   addMore.hidden=!isDouble||!doubleBaseReady()||count<1;
   if(isDouble&&count>0)$('#double-add-more-status').textContent='Du har allerede '+count+' planlagt '+(count===1?'kamp':'kampe')+'. Du kan tilføje flere uden at ændre de eksisterende.';
+  if(cleanupInfo)cleanupInfo.hidden=isDouble&&count>0;
+  if(cleanupUploads)cleanupUploads.hidden=isDouble&&count>0;
+  if(uploadMain)uploadMain.hidden=compact;
+  $('#discipline-cleanup').hidden=isDouble?!(count>0):!uploads.length;
  }
  $('#reset-discipline').textContent='Slet alt i '+(t?.name||'stævnet')+' · '+(labels[activeDiscipline]||'');
  $('#uploads-title').textContent=(t?.name||'Stævne')+' · '+(labels[activeDiscipline]||'')+' · Uploadede billeder';
@@ -821,7 +830,7 @@ function initFlow(){
  $('#single-opponent-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeSingleEvidence(file,'single-opponent')};
  $('#single-pool-input').onchange=e=>{const file=e.target.files?.[0];e.target.value='';if(file)analyzeSingleEvidence(file,'single-pool')};
  $('#single-manual-save').onclick=saveSingleManualResult;
- $('#batch-analyze').onclick=async()=>{if(batchBusy)return;if(activeDiscipline==='double'){if(!doubleReady())return toast('Upload først din profil, makkerens profil og begge modstanderprofiler til hver planlagt kamp.');try{await prepareDoubleBatchFromStored()}catch(e){return toast(e.message)}}else if(!batchFiles.length)return;if(!$('#ai-code').value)return toast('Indtast adgangskoden til AI-aflæsning.');batchBusy=true;renderFlow();const key=draftKey();state.aiDrafts[key] ||= {results:[]};let failed=0;for(let i=0;i<batchFiles.length;i++){const f=batchFiles[i];if(state.aiDrafts[key].results.some(r=>r.id===f.id))continue;const roleText=activeDiscipline==='double'?doubleRoleLabel(f.role):(f.role&&doubleRoles[f.role]?doubleRoles[f.role]:f.role==='result'?'Kamp/resultat':'');$('#batch-status').textContent=`Aflæser billede ${i+1} af ${batchFiles.length}${roleText?' · '+roleText:''} …`;try{const data=await requestImage(f.file,activeDiscipline==='double'?doubleAiRole(f.role||'general'):(f.role||'general'),wait=>{$('#batch-status').textContent=`Groqs gratis hastighedsgrænse er nået. Venter ${wait} sekunder og fortsætter automatisk med billede ${i+1} af ${batchFiles.length} …`});for(const p of data.players||[])if(!p.date)p.date=tournamentDate();state.aiDrafts[key].results.push({id:f.id,role:f.role,data});save();renderDraft()}catch(e){failed++;$('#batch-status').textContent=e.message;break}}batchBusy=false;if(!failed){rebuildAiMatchesFromDraft();if(activeDiscipline==='double')syncDoublePlanningFromDraft();save();batchFiles=[]}renderFlow();if(!failed)$('#batch-status').textContent=activeDiscipline==='double'?'Profilerne er aflæst, og de planlagte doublekampe er oprettet. Du kan senere tilføje resultater.':'Den samlede aflæsning er klar. Nye uploads finder du nu under “Se dine uploadede billeder”. AI kan tage fejl.'};
+ $('#batch-analyze').onclick=async()=>{if(batchBusy)return;if(activeDiscipline==='double'){if(!doubleReady())return toast('Upload først din profil, makkerens profil og begge modstanderprofiler til hver planlagt kamp.');try{await prepareDoubleBatchFromStored()}catch(e){return toast(e.message)}}else if(!batchFiles.length)return;if(!$('#ai-code').value)return toast('Indtast adgangskoden til AI-aflæsning.');batchBusy=true;renderFlow();const key=draftKey();state.aiDrafts[key] ||= {results:[]};let failed=0;for(let i=0;i<batchFiles.length;i++){const f=batchFiles[i];if(state.aiDrafts[key].results.some(r=>r.id===f.id))continue;const roleText=activeDiscipline==='double'?doubleRoleLabel(f.role):(f.role&&doubleRoles[f.role]?doubleRoles[f.role]:f.role==='result'?'Kamp/resultat':'');$('#batch-status').textContent=`Aflæser billede ${i+1} af ${batchFiles.length}${roleText?' · '+roleText:''} …`;try{const data=await requestImage(f.file,activeDiscipline==='double'?doubleAiRole(f.role||'general'):(f.role||'general'),wait=>{$('#batch-status').textContent=`Groqs gratis hastighedsgrænse er nået. Venter ${wait} sekunder og fortsætter automatisk med billede ${i+1} af ${batchFiles.length} …`});for(const p of data.players||[])if(!p.date)p.date=tournamentDate();state.aiDrafts[key].results.push({id:f.id,role:f.role,data});save();renderDraft()}catch(e){failed++;$('#batch-status').textContent=e.message;break}}batchBusy=false;if(!failed){rebuildAiMatchesFromDraft();if(activeDiscipline==='double'){syncDoublePlanningFromDraft();delete doublePlan().addingFrom}save();batchFiles=[]}renderFlow();if(!failed)$('#batch-status').textContent=activeDiscipline==='double'?'Profilerne er aflæst, og de planlagte doublekampe er oprettet. Du kan senere tilføje flere kampe.':'Den samlede aflæsning er klar. Nye uploads finder du nu under “Se dine uploadede billeder”. AI kan tage fejl.'};
  document.addEventListener('input',e=>{
   const score=e.target.closest?.('[data-note-score]');
   if(score){
