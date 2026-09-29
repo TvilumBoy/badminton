@@ -520,7 +520,6 @@ async function requestTournamentInfo(file){
  if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size>12*1024*1024)throw Error('Brug JPG, PNG eller WebP på højst 12 MB.');
  const data=await imageData(file);
  if(data.length>3500000)throw Error('Billedet fylder for meget til AI-aflæsning. Brug et screenshot på højst ca. 2,5 MB.');
- sessionStorage.setItem(TOURNAMENT_AI_CODE_KEY,code);
  for(let attempt=0;attempt<8;attempt++){
   const r=await fetch('/api/tournament',{method:'POST',headers:{'Content-Type':'application/json','x-app-code':code},body:JSON.stringify({image:data})});
   let body;try{body=await r.json()}catch{throw Error('AI-serveren er ikke tilgængelig på denne adresse.')}
@@ -531,6 +530,7 @@ async function requestTournamentInfo(file){
    await sleep((wait+1)*1000);continue;
   }
   if(!r.ok)throw Error(body.error||'Stævneoplysningerne kunne ikke aflæses.');
+  sessionStorage.setItem(TOURNAMENT_AI_CODE_KEY,code);
   return body;
  }
  throw Error('AI kunne ikke fortsætte efter flere automatiske forsøg.');
@@ -557,7 +557,7 @@ function initFlow(){
  const oldChange=changeView;changeView=function(v){if(batchBusy)return toast('Vent til aflæsningen er færdig.');oldChange(v)};
  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>changeView(b.dataset.view));
  $('#home-add').onclick=()=>{const remembered=cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'';if(remembered)$('#t-info-code').value=remembered;$('#tournament-dialog').showModal()};
- $('#t-info-upload').onclick=()=>$('#t-info-input').click();
+ $('#t-info-upload').onclick=()=>{const code=($('#t-info-code').value||cloudCode||sessionStorage.getItem(TOURNAMENT_AI_CODE_KEY)||'').trim();if(!code){$('#t-info-status').textContent='Indtast adgangskoden til AI-aflæsning først.';$('#t-info-code').focus();return}$('#t-info-input').click()};
  $('#t-info-input').onchange=async e=>{
   const file=e.target.files?.[0];e.target.value='';if(!file)return;
   const preview=$('#t-info-preview'),status=$('#t-info-status');
