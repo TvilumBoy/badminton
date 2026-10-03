@@ -759,12 +759,25 @@ function sameDoublePair(a,b){
 }
 function matchSavedDoubleToPool(entry){
  const ms=selectedMatches().filter(m=>m.discipline==='double');
- return ms.find(m=>sameDoublePair(m.opponentPlayers,entry.opponentPlayers))||null;
+ const exact=ms.find(m=>sameDoublePair(m.opponentPlayers,entry.opponentPlayers));
+ if(exact)return exact;
+ const poolOpp=(entry.opponentPlayers||[]).filter(p=>p?.name||p?.id);
+ if(!poolOpp.length)return null;
+ const ranked=ms.map(m=>({
+  m,
+  overlap:(m.opponentPlayers||[]).filter(saved=>poolOpp.some(p=>samePlayerLoose(saved,p))).length
+ })).filter(x=>x.overlap>0).sort((a,b)=>b.overlap-a.overlap);
+ if(!ranked.length)return null;
+ // Only use the partial match when it is unambiguous.
+ if(ranked.length>1&&ranked[0].overlap===ranked[1].overlap)return null;
+ return ranked[0].m;
 }
 function syncDoublePoolToMatches(){
- if(activeDiscipline!=='double')return;
+ if(activeDiscipline!=='double')return {matched:0,updated:0,conflicts:0};
+ let matched=0,updated=0,conflicts=0;
  for(const e of doublePoolEntries()){
   const m=matchSavedDoubleToPool(e);if(!m)continue;
+  matched++;
   m.poolSourceImage=e.sourceImage;
   if(e.round&&(!m.round||/^Kamp \d+$/.test(m.round)))m.round=e.round;
   if(!e.scores)continue;
@@ -772,10 +785,14 @@ function syncDoublePoolToMatches(){
    m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result;
    const mismatch=!!m.scores&&scoreKey(m.scores)!==scoreKey(e.scores);
    m.doublePoolConflict=mismatch?{manualScores:m.scores,screenshotScores:e.scores,sourceImage:e.sourceImage}:null;
+   if(mismatch)conflicts++;
   }else{
-   m.scores=e.scores;m.result=e.result;m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result;m.doublePoolConflict=null;
+   const changed=scoreKey(m.scores||'')!==scoreKey(e.scores)||m.result!==e.result;
+   m.scores=e.scores;m.result=e.result;m.poolScreenshotScores=e.scores;m.poolScreenshotResult=e.result;m.doublePoolConflict=null;m.confirmed=true;
+   if(changed)updated++;
   }
  }
+ return {matched,updated,conflicts};
 }
 function renderDoublePoolOverview(){
  const section=$('#double-pool-section'),box=$('#double-pool-overview'),status=$('#double-pool-status'),label=$('#double-pool-upload-label'),conflictBox=$('#double-pool-conflicts');
@@ -804,7 +821,10 @@ async function analyzeDoublePool(file){
   stored=await storeBatchFile(file,'double-pool');if(!$('#ai-code').value)$('#ai-code').value=code;sessionStorage.setItem(TOURNAMENT_AI_CODE_KEY,code);
   const data=await requestImage(file,'double-pool',wait=>{status.textContent='AI holder en kort pause. Fortsætter automatisk om ca. '+wait+' sekunder …'});
   const key=draftKey();state.aiDrafts[key] ||= {results:[]};state.aiDrafts[key].results.push({id:stored.id,role:'double-pool',data});
-  syncDoublePoolToMatches();save();render();toast('Puljeoversigten er opdateret.');
+  const sync=syncDoublePoolToMatches();save();render();
+  const savedText=sync.updated===1?'1 nyt resultat blev gemt automatisk.':sync.updated>1?sync.updated+' nye resultater blev gemt automatisk.':sync.conflicts?'Resultatet blev kontrolleret mod din manuelle indtastning.':'Puljeoversigten blev gemt automatisk.';
+  const liveStatus=$('#double-pool-status');if(liveStatus)liveStatus.textContent+=' '+savedText;
+  toast(savedText);
  }catch(e){
   if(stored){await imageDelete(stored.id);state.uploads=state.uploads.filter(u=>u.id!==stored.id)}
   status.textContent=e.message||'Puljeoversigten kunne ikke aflæses.';toast(status.textContent);
@@ -1035,12 +1055,19 @@ function renderDisciplineFrontSummary(){
  const ready=calculations.filter(x=>x.c.delta!==undefined);
  const allReady=ready.length===played.length;
  if(allReady){
-  const sum=ready.reduce((s,x)=>s+x.c.delta,0),start=Number(state.profile[activeDiscipline]),expected=Number.isFinite(start)?start+sum:null;
-  totalBox.innerHTML=`<strong class="${sum>=0?'good':'bad'}">${esc(signed(sum))} point</strong><span>${expected!==null?'Forventet '+esc(fmt(expected))+' point':'Samlet ændring'}</span>`;
+  const sum=ready.reduce((s,x)=>s+x.c.delta,0);
+  let detail='Samlet ændring';
+  if(ready.length===1){
+   const c=ready[0].c,diff=Number(c.ours)-Number(c.theirs),shown=(diff>0?'+':'')+fmt(diff);
+   detail='Pointforskel: '+shown+' ('+fmt(c.ours)+' mod '+fmt(c.theirs)+')';
+  }else if(activeDiscipline!=='single'){
+   detail='Se pointforskel for hvert doublepar nedenfor';
+  }
+  totalBox.innerHTML=`<strong class="${sum>=0?'good':'bad'}">${esc(signed(sum))} point</strong><span>${esc(detail)}</span>`;
  }else{
   totalBox.innerHTML=`<strong>Resultater gemt</strong><span>${ready.length} af ${played.length} er klar til pointberegning</span>`;
  }
- matchesBox.innerHTML=played.map(m=>{const c=calculation(m),n=simpleMatchNames(m),result=m.result==='win'?'Sejr':m.result==='loss'?'Nederlag':'Resultat gemt',score=m.scores||'Resultat',delta=c.delta!==undefined?signed(c.delta)+' point':c.reason||'Afventer';return `<div class="discipline-front-match"><div><b>${esc(n.opp)}</b><small>${esc(score)} · ${esc(result)}</small></div><span class="discipline-front-delta ${c.delta!==undefined?(c.delta>=0?'good':'bad'):'muted'}">${esc(delta)}</span></div>`}).join('');
+ matchesBox.innerHTML=played.map(m=>{const c=calculation(m),n=simpleMatchNames(m),result=m.result==='win'?'Sejr':m.result==='loss'?'Nederlag':'Resultat gemt',score=m.scores||'Resultat',delta=c.delta!==undefined?signed(c.delta)+' point':c.reason||'Afventer';let diffHtml='';if(activeDiscipline!=='single'&&c.delta!==undefined){const diff=Number(c.ours)-Number(c.theirs),shown=(diff>0?'+':'')+fmt(diff);diffHtml=`<small>Pointforskel: ${esc(shown)} · ${esc(fmt(c.ours))} mod ${esc(fmt(c.theirs))}</small>`}return `<div class="discipline-front-match"><div><b>${esc(n.opp)}</b><small>${esc(score)} · ${esc(result)}</small>${diffHtml}</div><span class="discipline-front-delta ${c.delta!==undefined?(c.delta>=0?'good':'bad'):'muted'}">${esc(delta)}</span></div>`}).join('');
 }
 function tournamentPointSummary(t){
  const today=new Date();today.setHours(0,0,0,0);
